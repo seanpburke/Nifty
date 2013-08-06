@@ -21,8 +21,8 @@
  *
  ******************************************************************************
  */
-#ifndef nft_core_h
-#define nft_core_h
+#ifndef nft_core_header
+#define nft_core_header
 
 #define nft_core_class "nft_core"
 
@@ -54,12 +54,13 @@ subclass * subclass##_lookup(subclass##_h h);
 #define NFT_DECLARE_DISCARD(subclass) \
 void subclass##_discard(subclass * s);
 
-#define NFT_DECLARE_HELPERS(subclass) \
+// Note that static is a parameter, which can be empty.
+#define NFT_DECLARE_HELPERS(subclass, static) \
 NFT_TYPEDEF_HANDLE(subclass) \
-NFT_DECLARE_CAST(subclass)   \
-NFT_DECLARE_HANDLE(subclass) \
-NFT_DECLARE_LOOKUP(subclass) \
-NFT_DECLARE_DISCARD(subclass)
+static NFT_DECLARE_CAST(subclass)   \
+static NFT_DECLARE_HANDLE(subclass) \
+static NFT_DECLARE_LOOKUP(subclass) \
+static NFT_DECLARE_DISCARD(subclass)
 
 
 #define NFT_DEFINE_CAST(subclass)		\
@@ -67,14 +68,15 @@ subclass * subclass##_cast(nft_core * p) { return nft_core_cast(p, subclass##_cl
 #define NFT_DEFINE_HANDLE(subclass) \
 subclass##_h subclass##_handle(const subclass * s) { return s->core.handle; }
 #define NFT_DEFINE_LOOKUP(subclass) \
-subclass * subclass##_lookup(subclass##_h h) { return subclass_cast(nft_core_lookup(h)); }
+subclass * subclass##_lookup(subclass##_h h) { return subclass##_cast(nft_core_lookup(h)); }
 #define NFT_DEFINE_DISCARD(subclass) \
 void subclass##_discard(subclass * s) { nft_core_discard(&s->core); }
 
-#define NFT_DEFINE_HELPERS(subclass) \
-NFT_DEFINE_CAST(subclass)   \
-NFT_DEFINE_HANDLE(subclass) \
-NFT_DEFINE_LOOKUP(subclass) \
-NFT_DEFINE_DISCARD(subclass)
+// Note that static is a parameter, which can be empty.
+#define NFT_DEFINE_HELPERS(subclass, static) \
+static NFT_DEFINE_CAST(subclass)   \
+static NFT_DEFINE_HANDLE(subclass) \
+static NFT_DEFINE_LOOKUP(subclass) \
+static NFT_DEFINE_DISCARD(subclass)
 
-#endif // nft_core_h
+#endif // nft_core_header

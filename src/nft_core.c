@@ -1,16 +1,16 @@
 /******************************************************************************
  * (C) Copyright Xenadyne Inc, 2013  All rights reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software for
- * any purpose and without fee is hereby granted, provided that the 
+ * any purpose and without fee is hereby granted, provided that the
  * above copyright notice appears in all copies.
- * 
- * XENADYNE INC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, 
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.  
- * IN NO EVENT SHALL XENADYNE BE LIABLE FOR ANY SPECIAL, INDIRECT OR 
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM THE 
- * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, 
- * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN 
+ *
+ * XENADYNE INC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.
+ * IN NO EVENT SHALL XENADYNE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM THE
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  ******************************************************************************
@@ -44,9 +44,9 @@ static pthread_mutex_t	CoreMutex = PTHREAD_MUTEX_INITIALIZER;
 ////////////////////////////////////////////////////////////////////////////////
 // Private functions to manage handles
 
-// For now, a very simple handle table - an array of nft_core*, indexed by handle.
-#define MAX_HANDLE 1000
-static nft_core    * Instances[MAX_HANDLE];
+// FIXME For now, a _very_ simple handle table.
+#define MAX_HANDLE 100000
+static nft_core    * Instance[MAX_HANDLE];
 static unsigned long NextHandle = 1;
 
 static void
@@ -60,29 +60,33 @@ handle_alloc(nft_core * p)
 {
     nft_handle result = NULL;
     int rc;
-    
+
     // Ensure that the handle table and mutex are initialized.
     rc = pthread_once(&CoreOnce, handle_init); assert(rc == 0);
 
     rc = pthread_mutex_lock(&CoreMutex); assert(rc == 0);
     if (NextHandle < MAX_HANDLE) {
-	Instances[NextHandle] = p;
+	Instance[NextHandle] = p;
 	result = (void*) NextHandle++;
     }
+    else {
+	assert(!"need a larger handle table");
+    }
     rc = pthread_mutex_unlock(&CoreMutex); assert(rc == 0);
-    
+
     return result;
 }
 
 static nft_core *
 handle_lookup(nft_handle h) {
-    return Instances[(unsigned long) h];
+    // NULL is an invalid handle by definition.
+    return h ? Instance[(unsigned long) h] : NULL ;
 }
 
 static void
 handle_clear(nft_handle h)
 {
-    Instances[(unsigned long) h] = NULL;
+    Instance[(unsigned long) h] = NULL;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -92,7 +96,11 @@ nft_core *
 nft_core_create(const char * class, size_t size)
 {
     nft_core * this = malloc(size);
-    *this = (nft_core) { class, handle_alloc(this), 1, nft_core_destroy };
+    if (this) {
+	*this = (nft_core) { class, handle_alloc(this), 1, nft_core_destroy };
+	assert(this->class);
+	assert(this->handle);
+    }
     return this;
 }
 
@@ -170,7 +178,7 @@ typedef struct subclass
 #define subclass_class nft_core_class ":subclass"
 
 // This macro expands to the following declarations:
-   NFT_DECLARE_HELPERS(subclass)
+NFT_DECLARE_HELPERS(subclass,)
 // typedef struct subclass_h * subclass_h;
 // subclass * subclass_cast(nft_core * p);
 // subclass_h subclass_handle(const subclass * s);
@@ -178,10 +186,10 @@ typedef struct subclass
 // void subclass_discard(subclass * s);
 
 // This macro expands to the following definitions:
-   NFT_DEFINE_HELPERS(subclass)
-// subclass * subclass_cast(nft_core * p) { return nft_core_cast(p, "nft_core" ":subclass"); 
-// subclass_h subclass_handle(const subclass * s) { return s->core.handle; 
-// subclass * subclass_lookup(subclass_h h) { return subclass_cast(nft_core_lookup(h)); 
+NFT_DEFINE_HELPERS(subclass,)
+// subclass * subclass_cast(nft_core * p) { return nft_core_cast(p, "nft_core" ":subclass");
+// subclass_h subclass_handle(const subclass * s) { return s->core.handle;
+// subclass * subclass_lookup(subclass_h h) { return subclass_cast(nft_core_lookup(h));
 // void subclass_discard(subclass * s) { nft_core_discard(&s->core); }
 
 // To complete our subclass, we define the destructor and constructor:

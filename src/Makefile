@@ -16,8 +16,8 @@ CPPFLAGS	+= -DUSE_GETTIMEOFDAY
 #
 # Select debug or optimized build.
 #
-CFLAGS		= -Wall -g  
-#CFLAGS		= -Wall -O2 -DNDEBUG		# optimized
+CFLAGS		= -std=c99 -Wall -g
+#CFLAGS		= -std=c99 -Wall -O2 -DNDEBUG	# optimized
 
 #
 # Choose appropriate link libraries.
@@ -31,7 +31,7 @@ LDLIBS		= -lpthread			# Solaris, Linux, AIX
 # You should not need to alter the definitions below.
 #
 LIB		= ../lib/libnifty.a
-SRCS		= nft_core.c
+SRCS		= nft_core.c nft_task.c
 OBJS		= ${SRCS:.c=.o}
 EXES		= ${SRCS:.c=}
 DIST		= ../Nifty.tgz
@@ -40,6 +40,7 @@ all:	$(LIB)
 
 test:	$(EXES)
 	./nft_core
+	./nft_task
 
 dist:    $(DIST)
 
@@ -53,9 +54,11 @@ $(LIB): $(OBJS)
 #
 # Build the unit test programs
 #
-nft_core: nft_core.c				
-	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LDLIBS) -o $@
+nft_core: nft_core.c  $(LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
+nft_task: nft_task.c  $(LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
 $(DIST): clean
 	tar zcvf $@ -C ../.. --exclude '.git' --exclude '*~' --exclude '*.tgz' Nifty

@@ -1,0 +1,5 @@
+*~
+*.o
+src/nft_core
+src/nft_task
+lib/libnifty.a
