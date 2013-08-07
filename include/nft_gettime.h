@@ -71,28 +71,24 @@ struct timespec
 #define NANOSEC         1000000000
 #endif
 
-static int
-gettime(struct timespec *ts)
+static struct timespec
+nft_gettime(void)
 {
-    int rc = 0;
-    
 #if defined(USE_FTIME)
     struct timeb tb;
-    ftime( &tb );
-    ts->tv_sec  = tb.time;
-    ts->tv_nsec = tb.millitm * 1000000;	/* milli to nano secs  */
+    int rc = ftime( &tb ); assert(rec == 0);
+    return (struct timespec){ tb.time, tb.millitm * 1000000 };	/* milli to nano secs  */
 
 #elif defined(USE_GETTIMEOFDAY)
-    struct timeval  tv;
-    rc = gettimeofday(&tv, NULL);
-    ts->tv_sec  = tv.tv_sec;
-    ts->tv_nsec = tv.tv_usec * 1000;	/* micro to nano secs  */
+    struct timeval tv;
+    int rc = gettimeofday(&tv, NULL); assert(rc == 0);
+    return (struct timespec){ tv.tv_sec, tv.tv_usec * 1000 };	/* micro to nano secs  */
 
 #elif defined(USE_CLOCKGETTIME)
-    rc = clock_gettime(CLOCK_REALTIME, ts);
-
+    struct timespec ts;
+    int rc = clock_gettime(CLOCK_REALTIME, &ts); assert(rec == 0);
+    return ts;
 #endif
-    return rc;
 }
 
 #endif // nft_gettime_header

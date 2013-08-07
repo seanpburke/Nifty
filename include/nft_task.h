@@ -61,10 +61,10 @@ typedef struct nft_task_h * nft_task_h;
  * If the task is cancelled, the arg is returned to the cancelling thread
  * so that it can be freed there.
  */
-nft_task_h  nft_task_schedule(const struct timespec * abstime,
-			      const struct timespec * interval,
-			      void		   (* function)(void *),
-			      void		    * arg);
+nft_task_h  nft_task_schedule(struct timespec abstime,
+			      struct timespec interval,
+			      void	   (* function)(void *),
+			      void          * arg);
 
 /*
  * nft_task_cancel - Cancel a scheduler task.
@@ -85,6 +85,48 @@ void *	    nft_task_cancel(nft_task_h taskh);
  */
 nft_task_h  nft_task_this(void);
 
+
+
+/******************************************************************************
+ *
+ * The nft_task package is completely functional, using only the APIs
+ * that are declared above this point. The declarations that follow,
+ * are only needed if you wish to implement a subclass based on nft_task.
+ *
+ ******************************************************************************
+ */
+
+/* The nft_task is a subclass of nft_core.
+ * For more information, consult the Nifty README.txt.
+ */
+typedef struct nft_task
+{
+    nft_core        core;
+
+    struct timespec abstime;		// absolute time to perform task
+    struct timespec interval;		// period to repeat task
+    void         (* action)(struct nft_task *);
+    void	 (* function)(void *);	// task user function
+    void	  * arg;		// argument to user function
+} nft_task;
+
+nft_task *
+nft_task_create( const char    * class,
+		 size_t          size,
+		 struct timespec abstime,
+		 struct timespec interval,
+		 void         (* function)(void *),
+		 void          * argument );
+void nft_task_destroy(nft_core * p);
+int  nft_task_schedule_task(nft_task * task);
+int  nft_task_cancel_task(nft_task * task);
+
+// Declare helper functions nft_task_cast, _handle, _lookup, and _discard.
+#define nft_task_class nft_core_class ":nft_task"
+NFT_DECLARE_CAST(nft_task)
+NFT_DECLARE_HANDLE(nft_task)
+NFT_DECLARE_LOOKUP(nft_task)
+NFT_DECLARE_DISCARD(nft_task)
 
 #endif // nft_task_header
 

@@ -46,58 +46,102 @@ static pthread_mutex_t	CoreMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // FIXME For now, a _very_ simple handle table.
 #define MAX_HANDLE 100000
-static nft_core    * Instance[MAX_HANDLE];
+static void * Instance[MAX_HANDLE];
 static unsigned long NextHandle = 1;
-
+static pthread_mutex_t HandleMutex = PTHREAD_MUTEX_INITIALIZER;
 static void
-handle_init(void)
-{
-    int rc = pthread_mutex_init(&CoreMutex, NULL); assert(rc == 0);
+handle_init(void) {
+    int rc;
+    rc = pthread_mutex_init(&CoreMutex,   NULL); assert(rc == 0);
+    rc = pthread_mutex_init(&HandleMutex, NULL); assert(rc == 0);
 }
 
-static nft_handle
-handle_alloc(nft_core * p)
+
+////////////////////////////////////////////////////////////////////////////////
+// nft_handle APIs
+
+nft_handle
+nft_handle_alloc(void * vp)
 {
-    nft_handle result = NULL;
-    int rc;
+    nft_handle handle = NULL;
 
     // Ensure that the handle table and mutex are initialized.
-    rc = pthread_once(&CoreOnce, handle_init); assert(rc == 0);
+    int rc = pthread_once(&CoreOnce, handle_init); assert(rc == 0);
 
-    rc = pthread_mutex_lock(&CoreMutex); assert(rc == 0);
+    rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
     if (NextHandle < MAX_HANDLE) {
-	Instance[NextHandle] = p;
-	result = (void*) NextHandle++;
+	Instance[NextHandle] = vp;
+	handle = (void*) NextHandle++;
     }
     else {
 	assert(!"need a larger handle table");
     }
-    rc = pthread_mutex_unlock(&CoreMutex); assert(rc == 0);
+    rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
 
-    return result;
+    return handle;
 }
 
-static nft_core *
-handle_lookup(nft_handle h) {
-    // NULL is an invalid handle by definition.
-    return h ? Instance[(unsigned long) h] : NULL ;
-}
-
-static void
-handle_clear(nft_handle h)
+void *
+nft_handle_lookup(nft_handle handle)
 {
-    Instance[(unsigned long) h] = NULL;
+    void * result = NULL;
+
+    // NULL is an invalid handle by definition.
+    if (handle) {
+	int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
+	result = Instance[(unsigned long) handle];
+	rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
+    }
+    return result; 
+}
+
+void
+nft_handle_delete(nft_handle handle, void * ref)
+{
+    // NULL is an invalid handle by definition.
+    if (handle) {
+	int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
+	// Sanity check - Does this handle really refer to ref?
+	assert(ref == Instance[(unsigned long) handle]);
+	Instance[(unsigned long) handle] = NULL;
+	rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Public APIs
+// nft_core APIs
+
+void *
+nft_core_cast(void * vp, const char * class)
+{
+    assert(class); // The class parameter is mandatory.
+
+    if (class && vp) {
+	// If vp really refers to a nft_core instance, class should be non-null.
+	nft_core * this = vp;
+	assert(this->class);
+
+	if (this->class) {
+	    const char * require = class;
+	    const char * inquire = this->class;
+
+	    // Test whether the required class is a prefix of the actual class.
+	    char   c;
+	    while ((c = *require++))
+		if (c != *inquire++)
+		    return NULL;
+	    return this;
+	}
+    }
+    return NULL;
+}
 
 nft_core *
 nft_core_create(const char * class, size_t size)
 {
     nft_core * this = malloc(size);
     if (this) {
-	*this = (nft_core) { class, handle_alloc(this), 1, nft_core_destroy };
+	*this = (nft_core) { class, nft_handle_alloc(this), 1, nft_core_destroy };
 	assert(this->class);
 	assert(this->handle);
     }
@@ -110,17 +154,17 @@ nft_core_destroy(nft_core * p)
     nft_core * this = nft_core_cast(p, nft_core_class);
     assert(this != NULL);
     if (this) {
-	assert(this->reference_count == 0);
-	free(this);
-    }
-}
+	// Clear the object's handle, so that no new references can be obtained via _lookup.
+	nft_handle_delete(this->handle, this);
+	this->handle = NULL;
 
-void *
-nft_core_cast(nft_core * this, const char * class)
-{
-    if (this && this->class && !strncmp(this->class, class, strlen(class)))
-	return this;
-    return NULL;
+	// If the reference count is not zero, it means that _destroy was called directly,
+	// rather than via _discard. That is an error, but we can behave as _discard would.
+	//
+	assert(this->reference_count == 0);
+	if    (this->reference_count  > 0) this->reference_count--;
+	if    (this->reference_count == 0) free(this);
+    }
 }
 
 nft_core *
@@ -128,7 +172,7 @@ nft_core_lookup(nft_handle h)
 {
     int rc = pthread_mutex_lock(&CoreMutex); assert(rc == 0);
 
-    nft_core * this = handle_lookup(h);
+    nft_core * this = nft_core_cast(nft_handle_lookup(h), nft_core_class);
     if (this) this->reference_count++;
 
     rc = pthread_mutex_unlock(&CoreMutex); assert(rc == 0);
@@ -141,13 +185,11 @@ nft_core_discard(nft_core * p)
 {
     nft_core * this = nft_core_cast(p, nft_core_class);
     if (this) {
-	assert(this->reference_count > 0);
-
 	int rc = pthread_mutex_lock(&CoreMutex); assert(rc == 0);
-	if (--this->reference_count == 0) {
-	    handle_clear(this->handle);
-	    this->destroy(this);
-	}
+
+	assert(this->reference_count  > 0);
+	if ( --this->reference_count == 0) this->destroy(this);
+
 	rc = pthread_mutex_unlock(&CoreMutex); assert(rc == 0);
     }
 }
@@ -185,12 +227,8 @@ NFT_DECLARE_HELPERS(subclass,)
 // subclass * subclass_lookup(subclass_h h);
 // void subclass_discard(subclass * s);
 
-// This macro expands to the following definitions:
+// This macro expands to definitions for the prototypes:
 NFT_DEFINE_HELPERS(subclass,)
-// subclass * subclass_cast(nft_core * p) { return nft_core_cast(p, "nft_core" ":subclass");
-// subclass_h subclass_handle(const subclass * s) { return s->core.handle;
-// subclass * subclass_lookup(subclass_h h) { return subclass_cast(nft_core_lookup(h));
-// void subclass_discard(subclass * s) { nft_core_discard(&s->core); }
 
 // To complete our subclass, we define the destructor and constructor:
 void

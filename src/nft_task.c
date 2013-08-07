@@ -1,16 +1,16 @@
 /******************************************************************************
  * (C) Copyright Xenadyne Inc, 2002  All rights reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software for
- * any purpose and without fee is hereby granted, provided that the 
+ * any purpose and without fee is hereby granted, provided that the
  * above copyright notice appears in all copies.
- * 
- * XENADYNE INC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, 
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.  
- * IN NO EVENT SHALL XENADYNE BE LIABLE FOR ANY SPECIAL, INDIRECT OR 
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM THE 
- * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, 
- * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN 
+ *
+ * XENADYNE INC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.
+ * IN NO EVENT SHALL XENADYNE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM THE
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  * File: nft_task.c
@@ -19,7 +19,10 @@
  *
  * This module defines a set of APIs that let you schedule functions
  * to be called asynchronously by another thread at a specified time.
- * See nft_task.h for more details.
+ *
+ * The API for this package is documented in nft_task.h.
+ * The unit test below provides examples of usage (see #ifdef MAIN).
+ *
  *
  * REALTIME SCHEDULING
  * ~~~~~~~~~~~~~~~~~~~
@@ -39,7 +42,6 @@
  * With these caveats in mind, if you wish to use realtime scheduling,
  * uncomment the #define USE_REALTIME_SCHEDULING symbol below.
  *
- * $Id: nft_task.c,v 1.16 2010/03/30 07:09:34 sean Exp $
  ******************************************************************************
  */
 #include <assert.h>
@@ -63,29 +65,6 @@
 
 // Define the minimum size of the queue's task array.
 #define MIN_SIZE   32
-
-/* The nft_task is a subclass of nft_core.
- * For more information, consult the Nifty README.txt.
- *
- * FIXME Since we are declaring the struct here rather than in nft_task.h.
- *       it is impossible to create subclasses of nft_task.
- */
-typedef struct nft_task
-{
-    nft_core        core;
-
-    struct timespec abstime;		// absolute time to perform task
-    struct timespec interval;		// period to repeat task
-    void	 (* function)(void *);	// task function
-    void	  * arg;		// argument to task function
-} nft_task;
-
-// Define the class name - this is mandatory.
-#define nft_task_class nft_core_class ":nft_task"
-
-// We don't publish nft_task pointers outside this file, so we define static
-// helper functions nft_task_cast, _handle, _lookup, and _discard.
-NFT_DEFINE_HELPERS(nft_task,static)
 
 /* All of the pending tasks are stored in a queue that is structured as a heap.
  * The tasks array is 1-based, so min[] must be sized to MIN_SIZE + 1.
@@ -120,6 +99,9 @@ static pthread_mutex_t	QueueMutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t	QueueCond  = PTHREAD_COND_INITIALIZER;
 static pthread_t	TaskThread;  // The task scheduler thread id.
 
+// Define the helper functions nft_task_cast, _handle, _lookup, and _discard.
+NFT_DEFINE_HELPERS(nft_task,)
+
 
 /*-----------------------------------------------------------------------------
  *
@@ -130,9 +112,7 @@ static pthread_t	TaskThread;  // The task scheduler thread id.
 static void *
 task_thread(void * ignore)
 {
-    int rc;
-    
-    rc = pthread_mutex_lock(&QueueMutex); assert(rc == 0);
+    int rc = pthread_mutex_lock(&QueueMutex); assert(rc == 0);
 
     while (1) // This loop never exits.
     {
@@ -150,10 +130,9 @@ task_thread(void * ignore)
 	}
 
 	// Get the time that we woke up.
-	struct timespec  curr;
-	rc = gettime(&curr); assert(rc == 0);
+	struct timespec curr = nft_gettime();
 
-	/* While there are tasks on the queue, check the topmost task 
+	/* While there are tasks on the queue, check the topmost task
 	 * to see if its abstime has been reached. If so, pop the queue
 	 * and execute the task.
 	 *
@@ -164,26 +143,20 @@ task_thread(void * ignore)
 	 */
 	while (heap_top(&Queue, &task))
 	{
-	    void  (* function)(void *) = task->function;
-	    void   * arg               = task->arg;
-
 	    if ((task->abstime.tv_sec >   curr.tv_sec) ||
 		((task->abstime.tv_sec == curr.tv_sec) &&
 		 (task->abstime.tv_nsec > curr.tv_nsec)))
-		/*
-		 * Task not yet due to execute.
-		 */
-		break;
+		break; // Task not yet due to execute.
 
 	    // Pop the top task from the queue.
 	    rc = heap_pop(&Queue, &task); assert(rc == 1);
-	    CurrentTask = nft_task_handle(task);
 
 	    /* If the task is a repeated task, reinsert it now, otherwise free it.
 	     * This is important to allow a task to cancel itself - the task must
 	     * be enqueued in order to be cancelable.
 	     */
-	    if ((task->interval.tv_sec != 0) || (task->interval.tv_nsec != 0))
+	    int discard = 1;
+	    if (task->interval.tv_sec || task->interval.tv_nsec)
 	    {
 		// Periodic task. Increment abstime (rather than current time)
 		// by the task interval, to prevent cumulative drift.
@@ -194,21 +167,21 @@ task_thread(void * ignore)
 		task->abstime.tv_sec += task->abstime.tv_nsec / NANOSEC;
 		task->abstime.tv_nsec = task->abstime.tv_nsec % NANOSEC;
 
-		// Re-insert task into queue, and null task so it won't be freed.
+		// Re-insert task into queue, and remember not to discard it.
 		heap_insert(&Queue, task);
-		task = NULL;
+		discard = 0;
 	    }
-
-	    /* Execute task function.
-	     * Yield the queue mutex while the task function executes,
-	     * in case the task function needs to add or cancel a task.
-	     * Free the task outside the mutex, to minimize mutex hold time.
+	    /* Yield the queue mutex while the task action executes,
+	     * in case the action needs to add or cancel a task.
 	     */
-	    pthread_mutex_unlock(&QueueMutex);
-	    if (task) free(task);
-	    function(arg);
-	    pthread_mutex_lock(&QueueMutex);
+	    rc = pthread_mutex_unlock(&QueueMutex); assert(rc == 0);
+
+	    CurrentTask = nft_task_handle(task);
+	    task->action(task);
 	    CurrentTask = NULL;
+	    if (discard) nft_task_discard(task);
+
+	    rc = pthread_mutex_lock(&QueueMutex); assert(rc == 0);
 	}
     }
     // Unlock the scheduler queue.
@@ -232,7 +205,7 @@ task_init(void)
 
     // Initialize the task queue.
     heap_init(&Queue);
-    
+
     // Initialize the condition and mutex that guard the task queue.
     rc = pthread_cond_init (&QueueCond,  NULL); assert(rc == 0);
     rc = pthread_mutex_init(&QueueMutex, NULL); assert(rc == 0);
@@ -258,7 +231,7 @@ task_init(void)
 	rc = pthread_attr_setschedparam(&attr, &param); assert(rc == 0);
     }
 #endif
-    
+
     // Create the task thread.
     rc = pthread_create(&TaskThread, &attr, task_thread, NULL); assert(rc == 0);
 
@@ -268,7 +241,14 @@ task_init(void)
     return;
 }
 
-static void
+
+/*-----------------------------------------------------------------------------
+ *
+ * Privileged APIs - these should only be used by subclasses
+ *
+ *-----------------------------------------------------------------------------
+ */
+void
 nft_task_destroy(nft_core * p)
 {
     // This destructor exists only so that subclasses derived from nft_task
@@ -276,42 +256,129 @@ nft_task_destroy(nft_core * p)
     nft_core_destroy(p);
 }
 
-static nft_task *
-nft_task_create(const char             * class,
-                size_t                   size,
-                const struct timespec  * abstime,
-                const struct timespec  * interval,
-                void                  (* function)(void *),
-                void                   * arg)
+static void
+nft_task_action(nft_task * t)
 {
-    nft_task    * task = nft_task_cast(nft_core_create(class, size));
+    // The default task action is to execute the user function,
+    // but subclasses may override it.
+    t->function(t->arg);
+}
 
-    // Override the nft_core destructor with our own.
-    task->core.destroy = nft_task_destroy;
+nft_task *
+nft_task_create(const char    * class,
+                size_t          size,
+                struct timespec abstime,
+                struct timespec interval,
+                void         (* function)(void *),
+                void          * arg)
+{
+    nft_task * task = nft_task_cast(nft_core_create(class, size));
+    if (task) {
+	// Override the nft_core destructor with our own.
+	task->core.destroy = nft_task_destroy;
+	task->action       = nft_task_action;
 
-    if (abstime) {
-	task->abstime  = *abstime;
+	task->interval = interval;
+	task->function = function;
+	task->arg      = arg;
+
+	if (abstime.tv_sec) {
+	    task->abstime  = abstime;
+	}
+	else {
+	    // If abstime isn't given, compute it as now plus one interval.
+	    task->abstime = nft_gettime();
+	    task->abstime.tv_sec  += interval.tv_sec;
+	    task->abstime.tv_nsec += interval.tv_nsec;
+	}
+
+	// Normalize the absolute time.
+	task->abstime.tv_sec += task->abstime.tv_nsec / NANOSEC;
+	task->abstime.tv_nsec = task->abstime.tv_nsec % NANOSEC;
+    }
+    return task;
+}
+
+// It is important to note that this is equivalent to nft_task_discard,
+// because the caller has released ownership of the task reference.
+// The caller must not use the task pointer after this call returns,
+// since it can easily happen that the task will have executed and
+// been destroyed, before this call returns.
+//
+// Returns 0 on success, or EINVAL if the task parameter is invalid.
+//
+int
+nft_task_schedule_task(nft_task * task)
+{
+    int error = 0;
+
+    // Check that the task argument is a valid nft_task reference.
+    if (!nft_task_cast(task)) return EINVAL;
+
+    // Ensure task package is initialized.
+    int rc = pthread_once(&QueueOnce, task_init); assert(rc == 0);
+
+    // Lock the queue.
+    rc = pthread_mutex_lock(&QueueMutex); assert(rc == 0);
+
+    // Attempt to insert the task pointer into queue.
+    if (heap_insert(&Queue, task))
+    {
+	// After inserting the task, obtain the current top pending task.
+	nft_task * top_task;
+	rc = heap_top(&Queue, &top_task); assert(rc > 0);
+
+	/* If the new task that we just inserted is now at the top of the heap,
+	 * signal the scheduler thread since the new entry must be due to execute
+	 * sooner than the previous topmost task.
+	 * Signal under the mutex to avoid a race condition in the WIN32 emulation of pthread_cond_wait().
+	 */
+	if (top_task == task) {
+	    rc = pthread_cond_signal(&QueueCond); assert(rc == 0);
+	}
     }
     else {
-	// If abstime isn't given, compute it as now plus one interval.    
-	gettime(&task->abstime);
-	task->abstime.tv_sec  += interval->tv_sec;
-	task->abstime.tv_nsec += interval->tv_nsec;
+	// heap_insert failed, presumably due to memory exhaustion.
+	assert(!"heap_insert failed");
+	error = ENOMEM;
+
+	// Normally, this call stores the task reference in the Queue.
+	// Since that did not happen, we need to discard this reference.
+	nft_task_discard(task);
     }
+    rc = pthread_mutex_unlock(&QueueMutex); assert(rc == 0);
 
-    // Normalize the absolute time.
-    task->abstime.tv_sec += task->abstime.tv_nsec / NANOSEC;
-    task->abstime.tv_nsec = task->abstime.tv_nsec % NANOSEC;
+    return error;
+}
 
-    if ( interval)
-	task->interval = *interval;
-    else
-	// task->interval.tv_sec = task->interval.tv_nsec = 0;
-	task->interval = (struct timespec){ 0 };
+// Attempt to remove the task from the Queue.
+// It may not be found, if the task has already executed.
+int
+nft_task_cancel_task(nft_task * task)
+{
+    // Check that the task argument is a valid nft_task reference.
+    if (!nft_task_cast(task)) return EINVAL;
 
-    task->function = function;
-    task->arg      = arg;
-    return task;
+    // Ensure task package is initialized.
+    int rc = pthread_once(&QueueOnce, task_init); assert(rc == 0);
+
+    // If the task is still in the queue, delete it and free the task object.
+    rc = pthread_mutex_lock(&QueueMutex); assert(rc == 0);
+
+    // Note that queue entries start at 1, not zero.
+    for (unsigned i = 1; i <= Queue.count; i++)
+	if (Queue.tasks[i] == task)
+	{
+	    // Discard the reference that was stored in the queue.
+	    // This reference was created in nft_task_schedule by nft_task_create().
+	    nft_task_discard(Queue.tasks[i]);
+
+	    // Remove the task from the queue.
+	    heap_delete(&Queue, i);
+	    break;
+	}
+    rc = pthread_mutex_unlock(&QueueMutex); assert(rc == 0);
+    return 0;
 }
 
 
@@ -334,56 +401,24 @@ nft_task_create(const char             * class,
  *-----------------------------------------------------------------------------
  */
 nft_task_h
-nft_task_schedule(const struct timespec  * abstime,
-		  const struct timespec  * interval,
-		  void			(* function)(void *),
-		  void			 * arg)
+nft_task_schedule(struct timespec abstime,
+		  struct timespec interval,
+		  void         (* function)(void *),
+		  void	        * arg)
 {
     // Validate inputs.
-    if ((!abstime && !interval) || !function) return NULL;
+    if (!(abstime.tv_sec || interval.tv_sec || interval.tv_nsec) || !function) return NULL;
 
-    // Create the task 
+    // Create the task.
     nft_task * task = nft_task_create(nft_task_class, sizeof(nft_task), abstime, interval, function, arg);
     if (!task) return NULL;
 
-    // Ensure task package is initialized.
-    int rc = pthread_once(&QueueOnce, task_init); assert(rc == 0);
+    // Save the handle - we cannot use task after calling nft_task_schedule_task.
+    nft_task_h handle = nft_task_handle(task);
+    int        error  = nft_task_schedule_task(task); assert(!error);
 
-    // Lock the queue.
-    rc = pthread_mutex_lock(&QueueMutex); assert(rc == 0);
-    
-    // Attempt to insert the task pointer into queue.
-    if (heap_insert(&Queue, task))
-    {
-	// After inserting the task, obtain the current top pending task.
-	nft_task * top_task;
-	rc = heap_top(&Queue, &top_task); assert(rc > 0);
-	
-	/* If the new task that we just inserted is now at the top of the heap,
-	 * signal the scheduler thread since the new entry must be due to execute
-	 * sooner than the previous topmost task.
-	 * Signal under the mutex to avoid a race condition in the WIN32 emulation of pthread_cond_wait().
-	 */
-	if (top_task == task) {
-	    rc = pthread_cond_signal(&QueueCond); assert(rc == 0);
-	}
-    }
-    else {
-	// heap_insert failed, presumably due to memory exhaustion.
-	//
-	// It is important discard our object reference (pointer),
-	// rather than calling nft_task_destroy directly, because
-	// that would not clear the handle. Since we hold the sole
-	// reference, discarding it will destroy the object.
-	// 
-	nft_task_discard(task);
-	task = NULL;
-    }
-    rc = pthread_mutex_unlock(&QueueMutex); assert(rc == 0);
-    
-    return task ? nft_task_handle(task) : NULL ;
+    return error ? NULL : handle;
 }
-
 
 /*-----------------------------------------------------------------------------
  *
@@ -398,37 +433,20 @@ nft_task_schedule(const struct timespec  * abstime,
 void *
 nft_task_cancel(nft_task_h handle)
 {
+    void     * arg  = NULL;
     nft_task * task = nft_task_lookup(handle);
-    if (!task)  return NULL;
-    
-    // Ensure task package is initialized.
-    int rc = pthread_once(&QueueOnce, task_init); assert(rc == 0);
 
-    // If the task is still in the queue, delete it and free the task object.
-    rc = pthread_mutex_lock(&QueueMutex); assert(rc == 0);
+    if (task) {
+	int rc = nft_task_cancel_task(task); assert(rc == 0);
 
-    // Note that queue entries start at 1, not zero.
-    for (unsigned i = 1; i <= Queue.count; i++)
-	if (Queue.tasks[i] == task)
-	{
-	    // Discard the reference that was stored in the queue.
-	    // This reference was created in nft_task_schedule by nft_task_create().	    
-	    nft_task_discard(Queue.tasks[i]);
-
-	    // Remove the task from the queue.
-	    heap_delete(&Queue, i);
-	    break;
-	}
-    rc = pthread_mutex_unlock(&QueueMutex); assert(rc == 0);
-
-    // Save the function arg, before we discard the nft_task reference
-    // that we obtained from nft_task_lookup, since it will not be safe
-    // to use that pointer after it has been discarded.
-    void * arg  = task->arg;
-    nft_task_discard(task);
+	// Save the function arg, _before_ we discard the nft_task reference
+	// that we obtained from nft_task_lookup. It will not be safe to use
+	// the task pointer after it has been discarded.
+	arg  = task->arg;
+	nft_task_discard(task);
+    }
     return arg;
 }
-
 
 /*-----------------------------------------------------------------------------
  *
@@ -455,17 +473,14 @@ nft_task_this(void)
 /*******		HEAP IMPLEMENTATION				*******/
 /*******								*******/
 /******************************************************************************/
-
-/*-----------------------------------------------------------------------------
- *
- * task_comp - Determine earlier of two tasks, used to order the Queue.
- *
- *-----------------------------------------------------------------------------
- */
 #ifdef WIN32
 #define inline __inline
 #endif
 
+/* task_comp
+ *
+ * Determine earlier of two tasks, used to order the Queue.
+ */
 static inline int
 task_comp(nft_task * t1, nft_task * t2)
 {
@@ -488,18 +503,12 @@ task_comp(nft_task * t1, nft_task * t2)
 	heap->tasks[y] = temp;			\
     }
 
-/*-------------------------------------------------------------------------------
- *
- * Name: upheap()
+/* upheap()
  *
  * Starts from the bottom of the heap up, restoring the heap condition.
- * heap_insert() adds a new member to the end of the heap, then calls 
+ * heap_insert() adds a new member to the end of the heap, then calls
  * this function so that the new element will percolate up until the
- * heap condition is satisfied. 
- *
- * Return Values: N/A
- *
- *-------------------------------------------------------------------------------
+ * heap condition is satisfied.
  */
 static void
 upheap(heap_t *heap, unsigned int child)
@@ -517,33 +526,27 @@ upheap(heap_t *heap, unsigned int child)
 	    SWAP_NODES(parent, child)
 	else
 	    break;
-	  
+
 	child = parent;
     }
 }
 
-/*-------------------------------------------------------------------------------
- *
- * Name: downheap()
+/* downheap()
  *
  * Starts from the top of the heap down, restoring the heap condition.
  * heap_pop() removes the top element from the heap, puts the last
  * element in its place, then calls this function to restore the heap.
- *
- * Return Values: N/A
- *
- *-------------------------------------------------------------------------------
  */
 static void
 downheap(heap_t *heap, unsigned int i)
 {
     unsigned int child1, child2, largest;
-	
+
     while ( i <= (heap->count >> 1))	/* then i has at least one child */
     {
 	child1 = i << 1;
 	child2 = child1 + 1;
-		
+
 	/* Find the largest of the two children of i. If child2 is not
 	 * within the heap, then child1 is by default.
 	 */
@@ -559,16 +562,11 @@ downheap(heap_t *heap, unsigned int i)
 	    SWAP_NODES(i, largest)
 	else
 	    break;
-	
 	i = largest;
     }
 }
 
-/*-------------------------------------------------------------------------------
- *
- * heap_init
- *
- *-------------------------------------------------------------------------------
+/* heap_init - Initialize a heap.
  */
 static void
 heap_init(heap_t * heap)
@@ -578,14 +576,10 @@ heap_init(heap_t * heap)
     heap->tasks = heap->min;
 }
 
-/*-------------------------------------------------------------------------------
- *
- * heap_resize
+/* heap_resize
  *
  * Reallocate the heap->tasks array to the new size.
  * Returns true on success, else failure.
- *
- *-------------------------------------------------------------------------------
  */
 static int
 heap_resize(heap_t *heap, int nsize)
@@ -598,8 +592,7 @@ heap_resize(heap_t *heap, int nsize)
 
     if (heap->size == MIN_SIZE)
     {
-	/* Growing from minimal size, need to malloc tasks.
-	 */
+	// Growing from minimal size, need to malloc tasks.
 	assert(heap->tasks == heap->min);
 	if (!(tasks = malloc((nsize + 1) * sizeof(nft_task *))))
 	    return 0;
@@ -608,8 +601,7 @@ heap_resize(heap_t *heap, int nsize)
     }
     else if (nsize == MIN_SIZE)
     {
-	/* Shrinking to minimal size, we can free tasks.
-	 */
+	// Shrinking to minimal size, we can free tasks.
 	assert(heap->tasks != heap->min);
 	memcpy(heap->min + 1, heap->tasks + 1, MIN_SIZE * sizeof(nft_task *));
 	free(heap->tasks);
@@ -617,30 +609,24 @@ heap_resize(heap_t *heap, int nsize)
     }
     else
     {
-	/* Reallocate the tasks array. Remember that the zeroth element is not used, so alloc nsize+1 elements.
-	 */
+	// Reallocate the tasks array. Remember that the zeroth element is not used, so alloc nsize+1 elements.
 	assert(heap->tasks != heap->min);
 	if (!(tasks = realloc(heap->tasks, (nsize + 1) * sizeof(nft_task *))))
 	    return 0;
 	heap->tasks = tasks;
     }
-
     heap->size = nsize;
     return 1;
 }
 
-/*-------------------------------------------------------------------------------
- *
- * heap_insert
+/* heap_insert
  *
  * Inserts a new item into the heap. The method is to  place the new node
  * at the end of the queue, and then call upheap() to restore the heap
  * condition, which will ensure that the largest item is at the head of
  * the queue.
  *
- * Return Values: True on success, false on malloc failure.
- *
- *-------------------------------------------------------------------------------
+ * Returns true on success, false on malloc failure.
  */
 static int
 heap_insert(heap_t *heap, nft_task * item)
@@ -653,48 +639,37 @@ heap_insert(heap_t *heap, nft_task * item)
 	    return 0;
 
     assert(heap->count < heap->size);
-    
+
     heap->count++;
     heap->tasks[heap->count] = item;
     upheap(heap, heap->count);
     return 1;
 }
 
-/*-------------------------------------------------------------------------------
+/* heap_top
  *
- * Name: heap_top
- *
- * Returns the top item on the heap, without removing it.
+ * Returns the top item on the heap (or NULL), without removing it.
  * Returns the heap count.
- *
- *-------------------------------------------------------------------------------
  */
 static unsigned int
 heap_top(heap_t *heap, nft_task ** itemp)
 {
-    if (heap->count > 0)
-	if (itemp) *itemp = heap->tasks[1];
-
+    if (itemp) *itemp = heap->count ? heap->tasks[1] : NULL ;
     return heap->count;
 }
 
-
-/*-------------------------------------------------------------------------------
- *
- * Name: heap_pop()
+/* heap_pop
  *
  * Removes the topmost item from the heap and returns it to the caller.
  * Returns 1 if a node was popped, or it returns zero if the heap was empty.
- *
- *-------------------------------------------------------------------------------
  */
 static int
 heap_pop(heap_t *heap, nft_task ** itemp)
 {
     int result = 0;
 
-    if (heap->count > 0) {
-	if (itemp) *itemp = heap->tasks[1];
+    if (itemp) *itemp = heap->count ? heap->tasks[1] : NULL ;
+    if (heap->count) {
 	SWAP_NODES( 1, heap->count)
 	heap->count--;
 	downheap(heap, 1);
@@ -708,15 +683,9 @@ heap_pop(heap_t *heap, nft_task ** itemp)
     return result;
 }
 
-/*-------------------------------------------------------------------------------
- *
- * Name: heap_delete()
- *
- * Description:
+/* heap_delete
  *
  * Deletes the node at index i in the heap. Refuses to delete 0.
- *
- *-------------------------------------------------------------------------------
  */
 static void
 heap_delete(heap_t *heap, unsigned int index)
@@ -747,7 +716,7 @@ heap_delete(heap_t *heap, unsigned int index)
 /******************************************************************************/
 /******************************************************************************/
 /*******								*******/
-/*******		TASK PACKAGE TEST DRIVER			*******/
+/*******		TASK PACKAGE UNIT TEST				*******/
 /*******								*******/
 /******************************************************************************/
 /******************************************************************************/
@@ -761,9 +730,6 @@ heap_delete(heap_t *heap, unsigned int index)
 #define sleep(n)  _sleep(n*1000)
 #define random    rand
 #endif
-
-
-static void test_heap();
 
 int Waiting = 0;
 
@@ -789,7 +755,7 @@ void
 cancel_task(void * arg)
 {
     void * result;
-    
+
     printf("Bang! ");
     result = nft_task_cancel(arg);
     assert(result != NULL);
@@ -817,43 +783,39 @@ test_msec(void * arg)
     test_msec_count--;
 }
 
-
-/*
- * main - test driver	Note that the tests depend on assert(),
- *			which means you must not compile with NDEBUG.
+/* test_basic
+ *
+ * These tests demonstrate how to use the nft_task API.
+ * Refer to test_subclass below, to see how to implement
+ * a subclass that inherits from nft_task.
  */
-int
-main(int argc, char *argv[])
-{
-    struct timespec absolute, interval;
-    nft_task_h	    task;
-    void          * arg = (void*) 1;
-
-    // Test the heap-sort implementation.
-    test_heap();
-
+void
+test_basic() {
     // Schedule a series of tasks at one second intervals.
     {
+	struct timespec absolute = nft_gettime();
+	struct timespec interval = { 0, 0 };
+	nft_task_h      task;
+
 	printf("Testing a series of nine tasks at one-second intervals:\n");
-	gettime(&absolute);
 	absolute.tv_sec += 1;
-	task = nft_task_schedule(&absolute, NULL, print_task, "one\n");
+	task = nft_task_schedule(absolute, interval, print_task, "one\n");
 	absolute.tv_sec += 1;
-	task = nft_task_schedule(&absolute, NULL, print_task, "two\n");
+	task = nft_task_schedule(absolute, interval, print_task, "two\n");
 	absolute.tv_sec += 1;
-	task = nft_task_schedule(&absolute, NULL, print_task, "three\n");
+	task = nft_task_schedule(absolute, interval, print_task, "three\n");
 	absolute.tv_sec += 1;
-	task = nft_task_schedule(&absolute, NULL, print_task, "four\n");
+	task = nft_task_schedule(absolute, interval, print_task, "four\n");
 	absolute.tv_sec += 1;
-	task = nft_task_schedule(&absolute, NULL, print_task, "five\n");
+	task = nft_task_schedule(absolute, interval, print_task, "five\n");
 	absolute.tv_sec += 1;
-	task = nft_task_schedule(&absolute, NULL, print_task, "six\n");
+	task = nft_task_schedule(absolute, interval, print_task, "six\n");
 	absolute.tv_sec += 1;
-	task = nft_task_schedule(&absolute, NULL, print_task, "seven\n");
+	task = nft_task_schedule(absolute, interval, print_task, "seven\n");
 	absolute.tv_sec += 1;
-	task = nft_task_schedule(&absolute, NULL, print_task, "eight\n");
+	task = nft_task_schedule(absolute, interval, print_task, "eight\n");
 	absolute.tv_sec += 1;
-	task = nft_task_schedule(&absolute, NULL, print_task, "nine\n");
+	task = nft_task_schedule(absolute, interval, print_task, "nine\n");
 
 	// Wait until the scheduled tasks have executed.
 	sleep(10);
@@ -868,16 +830,19 @@ main(int argc, char *argv[])
     {
 	printf("Testing schedule/cancel/cancel - ");
 
-	// Get the current time, and add the one interval.
-	gettime(&absolute);
+	struct timespec absolute = nft_gettime();
+	struct timespec interval = { 0, 0 };
+
+	// Add one second to the current time.
 	absolute.tv_sec += 1;
 
-	task = nft_task_schedule(&absolute, NULL, dot_task, &task);
+	void     * arg  = (void*) 123;
+	nft_task_h task = nft_task_schedule(absolute, interval, dot_task, arg);
 	if (!task) {
 	    printf("nft_task_schedule failed!\n");
 	    exit(1);
 	}
-	if (nft_task_cancel(task) != &task) {
+	if (nft_task_cancel(task) != arg) {
 	    printf("nft_task_cancel failed!\n");
 	    exit(1);
 	}
@@ -890,16 +855,15 @@ main(int argc, char *argv[])
 
     // Schedule a repeating task that prints a dot to the console once per second.
     {
-	int    i;
 	printf("Testing cancel of a repeating task:");
 
-	interval.tv_sec  = 1;
-	interval.tv_nsec = 0;
-	task = nft_task_schedule(NULL, &interval, dot_task, arg);
-	assert(task != 0);
+	struct timespec interval = { 1, 0 };
+	void     * arg  = (void*) 123;
+	nft_task_h task = nft_task_schedule((struct timespec){0,0}, interval, dot_task, arg);
+	assert(task);
 
 	// Cancel from the main thread after five seconds.
-	for (i = 0; i < 5; i++)	{
+	for (int i = 0; i < 5; i++) {
 	    sleep(1);
 	    fflush(stdout);
 	}
@@ -913,22 +877,21 @@ main(int argc, char *argv[])
     {
 	printf("Testing scheduled cancel of a repeating task:");
 
-	interval.tv_sec  = 1;
-	interval.tv_nsec = 0;
-	task = nft_task_schedule(NULL, &interval, dot_task, arg);
-	assert(task != 0);
+	struct timespec interval = { 1, 0 };
+	void          * arg  = (void *) 123;
+	nft_task_h      task = nft_task_schedule((struct timespec){0,0}, interval, dot_task, arg);
+	assert(task);
 
 	// Schedule a task to cancel the dot_task in 5 seconds.
-	gettime(&absolute);
+	struct timespec absolute = nft_gettime();
 	absolute.tv_sec += 5;
-	nft_task_schedule(&absolute, NULL, cancel_task, (void*) task);
+	nft_task_schedule(absolute, (struct timespec){0,0}, cancel_task, task);
 
 	Waiting = 1;
 	while (Waiting)	{
 	    sleep(1);
 	    fflush(stdout);
 	}
-
 	// The dot task should be gone.
 	puts( (nft_task_cancel(task) == NULL) ? " Passed!" : " Failed!");
     }
@@ -937,10 +900,11 @@ main(int argc, char *argv[])
     {
 	printf("Testing self-cancel of a repeating task:");
 
-	interval.tv_sec  = 1;
-	interval.tv_nsec = 0;
-	task = nft_task_schedule(NULL, &interval, cancel_self, arg);
-	assert(task != 0);
+	struct timespec absolute = { 0, 0 };
+	struct timespec interval = { 1, 0 };
+	void          * arg      = (void *) 123;
+	nft_task_h      task     = nft_task_schedule(absolute, interval, cancel_self, arg);
+	assert(task);
 
 	Waiting = 1;
 	while (Waiting)	{
@@ -954,25 +918,24 @@ main(int argc, char *argv[])
 
     // Stress test - schedule many tasks to execute randomly over 10 seconds.
     {
-	int n = 10000;
-	int i;
-
+	int n = 10000, i;
 	printf("Testing %d tasks over ten seconds:", n);
 	fflush(stdout);
 
 	/* Create a bunch of tasks over a 10-second interval.
 	 * Function test_msec() verifies that tasks execute in correct order.
-	 * The interval starts one second from now, so we expect all 
+	 * The interval starts one second from now, so we expect all
 	 * of the tasks to be created before the first one executes.
 	 */
-	gettime(&absolute);
-	for (i = 0; i < n; i++)	{
-	    struct timespec ts;
+	struct timespec absolute = nft_gettime();
+	for (i = 0; i < n; i++) {
 	    long  msec = random() % 10000;
-	    ts.tv_sec  = absolute.tv_sec  + (msec / 1000) + 1;
-	    ts.tv_nsec = absolute.tv_nsec + (msec % 1000) * 1000000;
-	    task = nft_task_schedule(&ts, NULL, test_msec, (void*) msec);
-	    assert(task != 0);
+	    struct timespec ts = {
+		absolute.tv_sec  + (msec / 1000) + 1,
+		absolute.tv_nsec + (msec % 1000) * 1000000
+	    };
+	    nft_task_h task = nft_task_schedule(ts, (struct timespec){0,0}, test_msec, (void*) msec);
+	    assert(task);
 	}
 
 	/* Wait for all of the tasks to finish.
@@ -1003,14 +966,15 @@ main(int argc, char *argv[])
 	 * interval beginning now. The intent is to overlap task creation
 	 * and execution.
 	 */
-	gettime(&absolute);
+	struct timespec absolute = nft_gettime();
 	for (i = 0; i < n; i++)
 	{
-	    struct timespec ts;
-	    int    msec = random() % 1000;
-	    ts.tv_sec  = absolute.tv_sec  + (msec / 1000);
-	    ts.tv_nsec = absolute.tv_nsec + (msec % 1000) * 1000000;
-	    task = nft_task_schedule(&ts, NULL, null_task, NULL);
+	    int msec = random() % 1000;
+	    struct timespec ts = {
+		absolute.tv_sec  + (msec / 1000),
+		absolute.tv_nsec + (msec % 1000) * 1000000
+	    };
+	    nft_task_h task = nft_task_schedule(ts, (struct timespec){0,0}, null_task, NULL);
 	    assert(task);
 	}
 
@@ -1025,23 +989,112 @@ main(int argc, char *argv[])
 
 	printf(" Passed!\n");
     }
-    
-#ifdef NDEBUG
-    printf("You must recompile this test driver without NDEBUG!\n");
-#else
-    printf("All tests passed.\n");
-#endif
-    exit(0);
 }
 
+/*****************************************************************************************
+ *
+ * waiter - Demonstrate a subclass based on nft_task.
+ *
+ * Here we define a subclass of nft_task, which waits for a file to appear.
+ * When the file appears, the file is unlinked, and the task cancels itself.
+ *
+ * This example could easily be implemented using only the basic nft_task API.
+ * Our intent is to demonstrate how you would create a new class based on nft_task.
+ */
+typedef struct waiter {
+    nft_task task;
+    char   * file;
+} waiter;
 
-static void
+// You must define the class string, showing its derivation from nft_task_class.
+#define waiter_class nft_task_class ":waiter"
+
+// This macro expands to declare the waiter_cast, _handle, _lookup, and _discard methods.
+NFT_DECLARE_HELPERS(waiter,static)
+
+// This macro expands to definitions of the _cast, _handle, _lookup, and _discard methods.
+NFT_DEFINE_HELPERS(waiter,static)
+
+// The destructor must free our attribues, then call nft_task_destroy.
+void
+waiter_destroy(nft_core * p)
+{
+    waiter * this = waiter_cast(p);
+    free(this->file);
+    nft_task_destroy(p);
+}
+
+// This will override the nft_task default action.
+void
+waiter_action(nft_task * p)
+{
+    waiter * this = waiter_cast(p);
+    if (access(this->file, R_OK) == 0) {
+	unlink(this->file);
+	nft_task_cancel_task(&this->task);
+    }
+}
+
+waiter *
+waiter_create(const char * file,  int period)
+{
+    // Create a task the repeats periodically.
+    struct timespec abstime  = {0,0};
+    struct timespec interval = {period,0};
+
+    nft_task    * task = nft_task_create(waiter_class, sizeof(waiter), abstime, interval, NULL, NULL);
+    task->core.destroy = waiter_destroy;
+    waiter      * this = waiter_cast(task);
+    this->task.action  = waiter_action;
+    this->file         = strdup(file);
+    return this;
+}
+
+void test_waiter()
+{
+    printf("Testing the waiter class...");
+
+    char   * file   = "waiter.tmp";
+    waiter * this   = waiter_create(file, 1);
+    waiter_h handle = waiter_handle(this);
+
+    nft_task_schedule_task(&this->task);
+    this = NULL; // this is no longer valid
+
+    // We can create a new, protected reference by looking up the handle.
+    waiter * reference;
+    if ((reference = waiter_lookup(handle)))
+    {
+	assert(strcmp(file, reference->file) == 0);
+
+	// Ensure that references are always discarded.
+	waiter_discard(reference);
+    }
+    
+    // Create the file that our waiter task is waint for.
+    char command[80];
+    snprintf(command, sizeof(command), "touch %s", file);
+    system(command);
+
+    // After two seconds, the waiter should have deleted the file.
+    // The waiter will have canceled itself, so handle has been deleted.
+    sleep(2);
+    assert(access(file, R_OK) != 0);
+    assert(!waiter_lookup(handle));
+
+    printf(" Passed!\n");
+}
+
+/****************************************************************************************/
+void
 test_heap()
 {
     /* Verify that the heap sort works correctly.
      */
     heap_t heap;
     heap_init(&heap);
+
+    printf("Testing the heap...");
 
     for (int i = 0; i < 10000; i++)
     {
@@ -1063,6 +1116,32 @@ test_heap()
 
 	free(task);
     }
+    printf(" Passed!\n");
+}
+
+/* main - Unit test for nft_task
+ *
+ * Note that the tests depend on assert(),
+ * which means you must not compile with NDEBUG.
+ */
+int
+main(int argc, char *argv[])
+{
+    // Test the heap-sort implementation.
+    test_heap();
+
+    // Test the subclass implementation
+    test_waiter();
+
+    // Test the nft_task user APIs
+    test_basic();
+
+#ifdef NDEBUG
+    printf("You must recompile this test driver without NDEBUG!\n");
+#else
+    printf("All tests passed.\n");
+#endif
+    exit(0);
 }
 
 #endif /* MAIN */
