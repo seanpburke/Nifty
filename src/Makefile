@@ -16,8 +16,8 @@ CPPFLAGS	+= -DUSE_GETTIMEOFDAY
 #
 # Select debug or optimized build.
 #
-CFLAGS		= -std=c99 -Wall -g
-#CFLAGS		= -std=c99 -Wall -O2 -DNDEBUG	# optimized
+CFLAGS		= -std=gnu99 -Wall -g
+#CFLAGS		= -std=gnu99 -Wall -O2 -DNDEBUG	# optimized
 
 #
 # Choose appropriate link libraries.
@@ -31,7 +31,7 @@ LDLIBS		= -lpthread			# Solaris, Linux, AIX
 # You should not need to alter the definitions below.
 #
 LIB		= ../lib/libnifty.a
-SRCS		= nft_core.c nft_task.c
+SRCS		= nft_core.c nft_queue.c nft_task.c
 OBJS		= ${SRCS:.c=.o}
 EXES		= ${SRCS:.c=}
 DIST		= ../Nifty.tgz
@@ -40,6 +40,7 @@ all:	$(LIB)
 
 test:	$(EXES)
 	./nft_core
+	./nft_queue  < /usr/share/dict/words	# Use /usr/dict/words on Solaris
 	./nft_task
 
 dist:    $(DIST)
@@ -54,10 +55,13 @@ $(LIB): $(OBJS)
 #
 # Build the unit test programs
 #
-nft_core: nft_core.c  $(LIB)
+nft_core: nft_core.c ../include/nft_core.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
-nft_task: nft_task.c  $(LIB)
+nft_queue: nft_queue.c ../include/nft_queue.h $(LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
+
+nft_task: nft_task.c ../include/nft_task.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
 $(DIST): clean

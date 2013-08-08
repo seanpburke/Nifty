@@ -125,11 +125,14 @@ nft_core_cast(void * vp, const char * class)
 	    const char * require = class;
 	    const char * inquire = this->class;
 
+	    // Since the class is set by a string literal,
+	    // the pointers will often be identical.
+	    if (require == inquire) return this;
+
 	    // Test whether the required class is a prefix of the actual class.
 	    char   c;
-	    while ((c = *require++))
-		if (c != *inquire++)
-		    return NULL;
+	    while ((c  = *require++))
+		if (c != *inquire++) return NULL;
 	    return this;
 	}
     }
@@ -154,14 +157,19 @@ nft_core_destroy(nft_core * p)
     nft_core * this = nft_core_cast(p, nft_core_class);
     assert(this != NULL);
     if (this) {
-	// Clear the object's handle, so that no new references can be obtained via _lookup.
+	// Delete the object's handle, so that no new references can be obtained via _lookup.
 	nft_handle_delete(this->handle, this);
 	this->handle = NULL;
 
-	// If the reference count is not zero, it means that _destroy was called directly,
-	// rather than via _discard. That is an error, but we can behave as _discard would.
+	// If the reference count is not zero, it means that nft_core_destroy was called directly,
+	// rather than via a _discard method. We support this usage, because it allows the caller
+	// to delete the handle and decrements one reference. Since the handle can no longer be
+	// dereferenced, this ensures that the object will be freed after the last outstanding
+	// reference is discarded.
 	//
-	assert(this->reference_count == 0);
+	// The nft_queue package takes advantage of this behavior in nft_queue_shutdown,
+	// so you can depend on this behavior not to change in the future.
+	//
 	if    (this->reference_count  > 0) this->reference_count--;
 	if    (this->reference_count == 0) free(this);
     }

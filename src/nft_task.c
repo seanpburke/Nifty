@@ -273,29 +273,28 @@ nft_task_create(const char    * class,
                 void          * arg)
 {
     nft_task * task = nft_task_cast(nft_core_create(class, size));
-    if (task) {
-	// Override the nft_core destructor with our own.
-	task->core.destroy = nft_task_destroy;
-	task->action       = nft_task_action;
+    if (!task) return NULL;
 
-	task->interval = interval;
-	task->function = function;
-	task->arg      = arg;
+    // Override the nft_core destructor with our own.
+    task->core.destroy = nft_task_destroy;
+    task->action       = nft_task_action;
+    task->interval     = interval;
+    task->function     = function;
+    task->arg          = arg;
 
-	if (abstime.tv_sec) {
-	    task->abstime  = abstime;
-	}
-	else {
-	    // If abstime isn't given, compute it as now plus one interval.
-	    task->abstime = nft_gettime();
-	    task->abstime.tv_sec  += interval.tv_sec;
-	    task->abstime.tv_nsec += interval.tv_nsec;
-	}
-
-	// Normalize the absolute time.
-	task->abstime.tv_sec += task->abstime.tv_nsec / NANOSEC;
-	task->abstime.tv_nsec = task->abstime.tv_nsec % NANOSEC;
+    if (abstime.tv_sec) {
+	task->abstime  = abstime;
     }
+    else {
+	// If abstime isn't given, compute it as now plus one interval.
+	task->abstime = nft_gettime();
+	task->abstime.tv_sec  += interval.tv_sec;
+	task->abstime.tv_nsec += interval.tv_nsec;
+    }
+    // Normalize the absolute time.
+    task->abstime.tv_sec += task->abstime.tv_nsec / NANOSEC;
+    task->abstime.tv_nsec = task->abstime.tv_nsec % NANOSEC;
+
     return task;
 }
 
@@ -381,6 +380,12 @@ nft_task_cancel_task(nft_task * task)
     return 0;
 }
 
+
+/******************************************************************************/
+/*******								*******/
+/*******		TASK PACKAGE PUBLIC APIS			*******/
+/*******								*******/
+/******************************************************************************/
 
 /*-----------------------------------------------------------------------------
  *

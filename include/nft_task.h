@@ -36,8 +36,7 @@
 #ifndef nft_task_header
 #define nft_task_header
 
-#include <time.h>
-#include <nft_core.h>
+#include <time.h> // for struct timespec
 
 /* All of the client APIs refer the task object by its handle.
  * The handle is just an integer, but we define it as a pointer
@@ -95,6 +94,7 @@ nft_task_h  nft_task_this(void);
  *
  ******************************************************************************
  */
+#include <nft_core.h>
 
 /* The nft_task is a subclass of nft_core.
  * For more information, consult the Nifty README.txt.
