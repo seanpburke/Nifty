@@ -19,6 +19,11 @@
  *
  * DESCRIPTION
  *
+ * This package is the core class for nft_queue, nft_pool and nft_task.
+ * It provides referenced counted objects, that can be identified by a
+ * unique handle. For more information about handles, and object-oriented
+ * development using nft_core, see the README.txt file.
+ *
  ******************************************************************************
  */
 #ifndef nft_core_header

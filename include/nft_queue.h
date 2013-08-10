@@ -189,6 +189,7 @@ void (*nft_queue_set_destroyer(nft_queue_h h, void (*destroyer)(void *)))(void *
  *
  ******************************************************************************
  */
+#include <pthread.h>
 #include <nft_core.h>
 
 /* struct nft_queue

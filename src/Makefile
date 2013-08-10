@@ -30,11 +30,12 @@ LDLIBS		= -lpthread			# Solaris, Linux, AIX
 #
 # You should not need to alter the definitions below.
 #
-LIB		= ../lib/libnifty.a
-SRCS		= nft_core.c nft_pool.c nft_queue.c nft_task.c
-OBJS		= ${SRCS:.c=.o}
-EXES		= ${SRCS:.c=}
-DIST		= ../Nifty.tgz
+LIBDIR	= ../lib
+LIB	= $(LIBDIR)/libnifty.a
+SRCS	= nft_core.c nft_pool.c nft_queue.c nft_task.c
+OBJS	= $(SRCS:.c=.o)
+EXES	= $(SRCS:.c=)
+DIST	= ../Nifty.tgz
 
 all:	$(LIB)
 
@@ -47,7 +48,7 @@ test:	$(EXES)
 dist:    $(DIST)
 
 
-$(LIB): $(OBJS)
+$(LIB): $(LIBDIR) $(OBJS)
 	ar -ruv $@ $(OBJS)
 
 .c.o:
@@ -70,6 +71,9 @@ nft_task: nft_task.c ../include/nft_task.h $(LIB)
 
 $(DIST): clean
 	tar zcvf $@ -C ../.. --exclude '.git' --exclude '*~' --exclude '*.tgz' Nifty
+
+$(LIBDIR):
+	mkdir -p $(LIBDIR)
 
 clean:
 	- rm *.o $(LIB) $(EXES) $(DIST)

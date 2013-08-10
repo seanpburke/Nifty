@@ -5,3 +5,6 @@ src/nft_queue
 src/nft_pool
 src/nft_task
 lib/libnifty.a
+
+# For XCode on MacOSX
+src/*.dSYM
