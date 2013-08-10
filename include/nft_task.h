@@ -49,7 +49,7 @@ typedef struct nft_task_h * nft_task_h;
  *
  * The abstime argument is defined as in pthread_cond_timedwait().
  * The interval argument is defined as in timer_settimer().
- * When the task comes due, the scheduler thread calls *function(arg).
+ * When the task comes due, the scheduler thread calls *function(argument).
  *
  * Either of the abstime or interval arguments may be null. If abstime
  * is null, the task will begin executing after one interval from the
@@ -63,7 +63,7 @@ typedef struct nft_task_h * nft_task_h;
 nft_task_h  nft_task_schedule(struct timespec abstime,
 			      struct timespec interval,
 			      void	   (* function)(void *),
-			      void          * arg);
+			      void          * argument);
 
 /*
  * nft_task_cancel - Cancel a scheduler task.
@@ -90,7 +90,9 @@ nft_task_h  nft_task_this(void);
  *
  * The nft_task package is completely functional, using only the APIs
  * that are declared above this point. The declarations that follow,
- * are only needed if you wish to implement a subclass based on nft_task.
+ * are _only_ needed if you wish to implement a subclass based on nft_task.
+ * You will find a demonstration how to do this in src/nft_task.c.
+ * Look for the section on nft_task_pool.
  *
  ******************************************************************************
  */
@@ -107,7 +109,7 @@ typedef struct nft_task
     struct timespec interval;		// period to repeat task
     void         (* action)(struct nft_task *);
     void	 (* function)(void *);	// task user function
-    void	  * arg;		// argument to user function
+    void	  * argument;		// argument to user function
 } nft_task;
 
 nft_task *

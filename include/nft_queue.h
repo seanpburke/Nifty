@@ -62,8 +62,13 @@ typedef struct nft_queue_h * nft_queue_h;
  *	destroyer  Frees queued items when the queue is destroyed.
  *
  *	Returns	NULL on malloc failure.
+ *
+ *	Note that nft_queue create is actually a convenience macro.
+ *	The function nft_create_f accepts class and size arguments,
+ *      to enable subclasses bases on nft_queue.
  */
-nft_queue_h nft_queue_create(int limit,  void  (*destroyer)(void *));
+#define          nft_queue_create(limit,destroyer) \
+nft_queue_handle(nft_queue_create_f(nft_queue_class, sizeof(nft_queue), limit, destroyer));
 
 
 /*	Append an item to the tail of the queue.
@@ -147,6 +152,59 @@ void  * nft_queue_peek(nft_queue_h q);
  *	Returns the previous destroyer function.
  */
 void (*nft_queue_set_destroyer(nft_queue_h h, void (*destroyer)(void *)))(void *);
+
+
+/******************************************************************************
+ *
+ * The nft_queue package is completely functional, using only the APIs that
+ * are declared above this point. But, you may wish to implement a subclass
+ * based on nft_task. For example, the nft_pool package derives from nft_queue.
+ * The declarations that follow, are _only_ needed to author subclasses.
+ *
+ ******************************************************************************
+ */
+#include <nft_core.h>
+
+/* struct nft_queue
+ *
+ * The queued items are stored in a "circular array", meaning that
+ * we access it using modulo arithmetic. This array is allocated
+ * initially to the minimum size defined below, and grows by doubling.
+ * Whenever the queue is less than one quarter full, the array size
+ * is halved to free memory.
+ */
+#define NFT_QUEUE_MIN_SIZE 32
+typedef struct nft_queue
+{
+    nft_core            core;
+    pthread_mutex_t	mutex;	// Lock to protect queue.
+    pthread_cond_t	cond;	// Signals waiting threads.
+    unsigned		nwait;	// Number of waiting threads.
+    int			first;	// First item in array.
+    int			next;	// Next free item in array.
+    int			size;	// Size of array.
+    int			limit;	// Maximum number of items.
+    void	     ** array;	// Array holding queued items.
+    void	      * minarray[NFT_QUEUE_MIN_SIZE]; // Initial array
+
+    void		(*destroyer)(void * item);
+} nft_queue;
+
+nft_queue *
+nft_queue_create_f(const char * class,
+                   size_t       size,
+                   int          limit,
+		   void      (* destroyer)(void *));
+
+void
+nft_queue_destroy(nft_core * p);
+
+// Declare helper functions nft_queue_cast, _handle, _lookup, and _discard.
+#define nft_queue_class nft_core_class ":nft_queue"
+NFT_DECLARE_CAST(nft_queue)
+NFT_DECLARE_HANDLE(nft_queue)
+NFT_DECLARE_LOOKUP(nft_queue)
+NFT_DECLARE_DISCARD(nft_queue)
 
 
 #endif // nft_queue_header

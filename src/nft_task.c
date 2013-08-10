@@ -104,9 +104,7 @@ NFT_DEFINE_HELPERS(nft_task,)
 
 
 /*-----------------------------------------------------------------------------
- *
  * task_thread - The scheduler thread.
- *
  *-----------------------------------------------------------------------------
  */
 static void *
@@ -192,9 +190,7 @@ task_thread(void * ignore)
 
 
 /*-----------------------------------------------------------------------------
- *
  * task_init  - Initialize the task scheduler. Called by pthread_once().
- *
  *-----------------------------------------------------------------------------
  */
 static void
@@ -243,9 +239,7 @@ task_init(void)
 
 
 /*-----------------------------------------------------------------------------
- *
  * Privileged APIs - these should only be used by subclasses
- *
  *-----------------------------------------------------------------------------
  */
 void
@@ -261,7 +255,7 @@ nft_task_action(nft_task * t)
 {
     // The default task action is to execute the user function,
     // but subclasses may override it.
-    t->function(t->arg);
+    t->function(t->argument);
 }
 
 nft_task *
@@ -270,8 +264,11 @@ nft_task_create(const char    * class,
                 struct timespec abstime,
                 struct timespec interval,
                 void         (* function)(void *),
-                void          * arg)
+                void          * argument)
 {
+    // Validate inputs.
+    if (!(abstime.tv_sec || interval.tv_sec || interval.tv_nsec) || !function) return NULL;
+
     nft_task * task = nft_task_cast(nft_core_create(class, size));
     if (!task) return NULL;
 
@@ -280,7 +277,7 @@ nft_task_create(const char    * class,
     task->action       = nft_task_action;
     task->interval     = interval;
     task->function     = function;
-    task->arg          = arg;
+    task->argument     = argument;
 
     if (abstime.tv_sec) {
 	task->abstime  = abstime;
@@ -388,12 +385,11 @@ nft_task_cancel_task(nft_task * task)
 /******************************************************************************/
 
 /*-----------------------------------------------------------------------------
- *
  * nft_task_schedule - Schedule a task for future execution by the scheduler.
  *
  * The abstime argument is defined as in pthread_cond_timedwait().
  * The interval argument is defined as in timer_settimer().
- * When the task comes due, the scheduler thread calls *function(arg).
+ * When the task comes due, the scheduler thread calls *function(argument).
  *
  * Either abstime or interval may be null.
  * If abstime is null, the task will begin running after one interval.
@@ -402,20 +398,16 @@ nft_task_cancel_task(nft_task * task)
  * The function must free any resources associated with arg, if necessary.
  * If the task is cancelled, the arg is returned to the cancelling thread
  * so that it can be freed there.
- *
  *-----------------------------------------------------------------------------
  */
 nft_task_h
 nft_task_schedule(struct timespec abstime,
 		  struct timespec interval,
 		  void         (* function)(void *),
-		  void	        * arg)
+		  void	        * argument)
 {
-    // Validate inputs.
-    if (!(abstime.tv_sec || interval.tv_sec || interval.tv_nsec) || !function) return NULL;
-
     // Create the task.
-    nft_task * task = nft_task_create(nft_task_class, sizeof(nft_task), abstime, interval, function, arg);
+    nft_task * task = nft_task_create(nft_task_class, sizeof(nft_task), abstime, interval, function, argument);
     if (!task) return NULL;
 
     // Save the handle - we cannot use task after calling nft_task_schedule_task.
@@ -426,19 +418,17 @@ nft_task_schedule(struct timespec abstime,
 }
 
 /*-----------------------------------------------------------------------------
- *
  * nft_task_cancel - Cancel a scheduler task.
  *
  * Returns the task->arg to the caller, in case the caller needs to free it.
  * Returns NULL if the task was not found, as with a one-shot that has already
  * executed. So yes, you need to make arg non-null to distinguish failure.
- *
  *-----------------------------------------------------------------------------
  */
 void *
 nft_task_cancel(nft_task_h handle)
 {
-    void     * arg  = NULL;
+    void     * argument = NULL;
     nft_task * task = nft_task_lookup(handle);
 
     if (task) {
@@ -447,20 +437,18 @@ nft_task_cancel(nft_task_h handle)
 	// Save the function arg, _before_ we discard the nft_task reference
 	// that we obtained from nft_task_lookup. It will not be safe to use
 	// the task pointer after it has been discarded.
-	arg  = task->arg;
+	argument = task->argument;
 	nft_task_discard(task);
     }
-    return arg;
+    return argument;
 }
 
 /*-----------------------------------------------------------------------------
- *
  * nft_task_this - Return the handle to the current task.
  *
  * This convenience function allows your task function to get its own
  * task handle, making it easy for repeating tasks to cancel themselves.
  * It should only be called within the task code.
- *
  *-----------------------------------------------------------------------------
  */
 nft_task_h
@@ -997,97 +985,131 @@ test_basic() {
 }
 
 /*****************************************************************************************
+ * nft_task_pool	- Demonstrate a subclass based on nft_task and nft_pool.
  *
- * waiter - Demonstrate a subclass based on nft_task.
+ * The major caveat for the nft_task package, is that all tasks execute in the scheduler
+ * thread. This means that, should any task be blocked, all subsequently scheduled tasks
+ * will be delayed until the blocked task completes (if ever). The usual solution to this
+ * problem, is to have your sheduled task submit a work item to a thread pool, in order
+ * to guarantee that it cannot block.
  *
- * Here we define a subclass of nft_task, which waits for a file to appear.
- * When the file appears, the file is unlinked, and the task cancels itself.
- *
- * This example could easily be implemented using only the basic nft_task API.
- * Our intent is to demonstrate how you would create a new class based on nft_task.
+ * Here, we illustrate a class that does this for you, use nft_task as a base class,
+ * and incorporating a nft_pool to which all sheduled tasks are submitted when they
+ * are ready to be executed.
  */
-typedef struct waiter {
+typedef struct nft_task_pool {
     nft_task task;
-    char   * file;
-} waiter;
+} nft_task_pool;
 
 // You must define the class string, showing its derivation from nft_task_class.
-#define waiter_class nft_task_class ":waiter"
+#define nft_task_pool_class nft_task_class ":nft_task_pool"
 
-// This macro expands to declare the waiter_cast, _handle, _lookup, and _discard methods.
-NFT_DECLARE_HELPERS(waiter,static)
+// This macro expands to declare the nft_task_pool_cast, _handle, _lookup, and _discard methods.
+NFT_DECLARE_HELPERS(nft_task_pool,static)
 
 // This macro expands to definitions of the _cast, _handle, _lookup, and _discard methods.
-NFT_DEFINE_HELPERS(waiter,static)
+NFT_DEFINE_HELPERS(nft_task_pool,static)
 
-// The destructor must free our attribues, then call nft_task_destroy.
+// Our class will submit scheduled tasks to this global thread pool for execution.
+// We provide a pthread_once function to initialize it.
+#include <nft_pool.h>
+static nft_pool_h       OurPool      = NULL;
+static pthread_once_t   OurPoolOnce  = PTHREAD_ONCE_INIT;
+static void
+nft_task_pool_init(void)
+{
+    // Since we don't want the task scheduler thread to block when it
+    // submits a work item to the pool, we want to use a large queue limit.
+    // Since we only need this for tasks that will be delayed by file and
+    // network IO, we also want to allow a large number of threads.
+    //
+    OurPool = nft_pool_create(1024, // use a large queue_limit
+			        64, // max_threads is also large
+			         0);// stack_size is the system default
+}
+
+// This will override the default nft_task action.
+// The default action executes the task function in the scheduler thread.
+// Instead, we submit the task function with its argument to a thread pool.
 void
-waiter_destroy(nft_core * p)
+nft_task_pool_action(nft_task * p)
 {
-    waiter * this = waiter_cast(p);
-    free(this->file);
-    nft_task_destroy(p);
+    nft_task_pool * task = nft_task_pool_cast(p);
+
+    // The entire point of this class is to be nonblocking,
+    // so it might make sense to use nft_pool_add_wait with timeout
+    // set to zero, which causes _add_wait to fail immediately with
+    // ETIMEDOUT, rather than block. But the problem in that case is,
+    // what to do with the schedule task that will not be executed?
+    //
+    nft_pool_add(OurPool, task->task.function, task->task.argument);
 }
 
-// This will override the nft_task default action.
-void
-waiter_action(nft_task * p)
+// Our constructor only needs to initialize OurPool,
+// and to override the default nft_task.action.
+nft_task_pool *
+nft_task_pool_create(struct timespec abstime,
+                     struct timespec interval,
+                     void         (* function)(void *),
+                     void          * argument)
 {
-    waiter * this = waiter_cast(p);
-    if (access(this->file, R_OK) == 0) {
-	unlink(this->file);
-	nft_task_cancel_task(&this->task);
+    // Ensure that that our thread pool has been created.
+    int rc = pthread_once(&OurPoolOnce, nft_task_pool_init); assert(rc == 0);
+
+    // Invoke the base class constructor, passing our class string and size.
+    nft_task * task = nft_task_create(nft_task_pool_class, sizeof(nft_task_pool), abstime, interval, function, argument);
+    if (!task) return NULL;
+
+    task->action = nft_task_pool_action;
+    return nft_task_pool_cast(task);
+}
+
+// nft_task_pool_schedule is just a slight varation on nft_task_schedule.
+nft_task_pool_h
+nft_task_pool_schedule(struct timespec abstime,
+		       struct timespec interval,
+		       void         (* function)(void *),
+		       void          * argument)
+{
+    // Create the task.
+    nft_task_pool * task = nft_task_pool_create(abstime, interval, function, argument);
+    if (!task) return NULL;
+
+    // Save the handle - we cannot use task after calling nft_task_schedule_task.
+    nft_task_pool_h handle = nft_task_pool_handle(task);
+    int             error  = nft_task_schedule_task((nft_task *)task); assert(!error);
+
+    return error ? NULL : handle;
+}
+
+// Here is a task function that would block the nft_task scheduler thread.
+void sleeper(void * arg) {
+    long howlong = (long) arg;
+    printf("I will sleep for %ld seconds...\n", howlong);
+    sleep(howlong);
+    printf("I have slept for %ld seconds...\n", howlong);
+}
+
+void test_nft_task_pool()
+{
+    printf("testing nft_task_pool...");
+
+    // We shedule all of these tasks so that the delay plus sleep time
+    // sums to ten seconds. So a task should begin sleeping once each
+    // second, and they should all finish after ten seconds.
+    //
+    // Just change nft_task_pool_schedule to nft_task_schedule,
+    // to see what would happen without the thread pool.
+    //
+    for (int delay = 1; delay < 10; delay++) {
+	struct timespec when = nft_gettime();
+	when.tv_sec += delay;
+	long howlong = 10 - delay;
+	nft_task_pool_h ph = nft_task_pool_schedule(when, (struct timespec){0,0}, sleeper, (void*)howlong);
+	assert(ph != NULL);
     }
-}
-
-waiter *
-waiter_create(const char * file,  int period)
-{
-    // Create a task the repeats periodically.
-    struct timespec abstime  = {0,0};
-    struct timespec interval = {period,0};
-
-    nft_task    * task = nft_task_create(waiter_class, sizeof(waiter), abstime, interval, NULL, NULL);
-    task->core.destroy = waiter_destroy;
-    waiter      * this = waiter_cast(task);
-    this->task.action  = waiter_action;
-    this->file         = strdup(file);
-    return this;
-}
-
-void test_waiter()
-{
-    printf("Testing the waiter class...");
-
-    char   * file   = "waiter.tmp";
-    waiter * this   = waiter_create(file, 1);
-    waiter_h handle = waiter_handle(this);
-
-    nft_task_schedule_task(&this->task);
-    this = NULL; // this is no longer valid
-
-    // We can create a new, protected reference by looking up the handle.
-    waiter * reference;
-    if ((reference = waiter_lookup(handle)))
-    {
-	assert(strcmp(file, reference->file) == 0);
-
-	// Ensure that references are always discarded.
-	waiter_discard(reference);
-    }
-    
-    // Create the file that our waiter task is waint for.
-    char command[80];
-    snprintf(command, sizeof(command), "touch %s", file);
-    system(command);
-
-    // After two seconds, the waiter should have deleted the file.
-    // The waiter will have canceled itself, so handle has been deleted.
-    sleep(2);
-    assert(access(file, R_OK) != 0);
-    assert(!waiter_lookup(handle));
-
-    printf(" Passed!\n");
+    sleep(12);
+    printf("Passed!\n");
 }
 
 /****************************************************************************************/
@@ -1133,13 +1155,13 @@ int
 main(int argc, char *argv[])
 {
     // Test the heap-sort implementation.
-    test_heap();
+//    test_heap();
 
     // Test the subclass implementation
-    test_waiter();
+    test_nft_task_pool();
 
     // Test the nft_task user APIs
-    test_basic();
+//    test_basic();
 
 #ifdef NDEBUG
     printf("You must recompile this test driver without NDEBUG!\n");

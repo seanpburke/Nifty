@@ -46,39 +46,7 @@
 #include <nft_gettime.h>
 #include <nft_queue.h>
 
-/* struct nft_queue
- *
- * The queued items are stored in a "circular array", meaning that
- * we access it using modulo arithmetic. This array is allocated
- * initially to the minimum size defined below, and grows by doubling.
- * Whenever the queue is less than one quarter full, the array size
- * is halved to free memory.
- */
-#define MIN_SIZE 32
-
-/* We define struct nft_queue locally, and create static helper functions.
- * This prevents others from implementing a subclass based on nft_queue,
- * but I don't see that as a problem, because I can't think why anyone
- * would ever want to do that.
- */
-typedef struct nft_queue
-{
-    nft_core            core;
-    pthread_mutex_t	mutex;	// Lock to protect queue.
-    pthread_cond_t	cond;	// Signals waiting threads.
-    unsigned		nwait;	// Number of waiting threads.
-    int			first;	// First item in array.
-    int			next;	// Next free item in array.
-    int			size;	// Size of array.
-    int			limit;	// Maximum number of items.
-    void	     ** array;	// Array holding queued items.
-    void	      * minarray[MIN_SIZE]; // Initial array
-
-    void		(*destroyer)(void * item);
-} nft_queue;
-
-#define nft_queue_class nft_core_class ":nft_queue"
-NFT_DEFINE_HELPERS(nft_queue,static);
+NFT_DEFINE_HELPERS(nft_queue,);
 
 /* Here are some macros to help us manage the circular array.
  * Note that an empty queue is indicated by setting q->first = -1,
@@ -94,19 +62,17 @@ NFT_DEFINE_HELPERS(nft_queue,static);
 
 /* The queue initially points array to minarray[], grows by doubling,
  * and shrinks by halving. The array pointer is redirected to malloc
- * memory when it grows beyond MIN_SIZE.
+ * memory when it grows beyond NFT_QUEUE_MIN_SIZE.
  *
  * These macros define when to grow and shrink the queue's array.
  * We shrink the array by halves, but only when the count
  * has dropped to a quarter of the size, to reduce thrashing.
  */
 #define GROW(q)   (FULL(q) && (!q->limit || (q->size < q->limit)))
-#define SHRINK(q) ((COUNT(q) < (q->size/4)) && (MIN_SIZE <= (q->size/2)))
+#define SHRINK(q) ((COUNT(q) < (q->size/4)) && (NFT_QUEUE_MIN_SIZE <= (q->size/2)))
 
 /*----------------------------------------------------------------------
- *
  * queue_validate - Validate the consistency of the queue.
- *
  *----------------------------------------------------------------------
  */
 static int
@@ -119,10 +85,8 @@ queue_validate( nft_queue * q)
 }
 
 /*----------------------------------------------------------------------
- *
  *  queue_grow() - Allocate more space for q->array.
  *		   Returns 0 on success, else ENOMEM on malloc failure.
- *
  *----------------------------------------------------------------------
  */
 static int
@@ -170,9 +134,7 @@ queue_grow(nft_queue * q)
 
 
 /*----------------------------------------------------------------------
- *
  *  queue_shrink() - Reduce the space allocated for the array.
- *
  *----------------------------------------------------------------------
  */
 static void
@@ -202,7 +164,7 @@ queue_shrink(nft_queue * q)
 	q->next  = count;
     }
     int nsize = q->size / 2;
-    if (nsize == MIN_SIZE) {
+    if (nsize == NFT_QUEUE_MIN_SIZE) {
 	memcpy(q->minarray, q->array, nsize * sizeof(void*));
 	free(q->array);
 	q->array = q->minarray;
@@ -217,13 +179,11 @@ queue_shrink(nft_queue * q)
 
 
 /*----------------------------------------------------------------------
- *
  *  queue_cleanup() - cancellation cleanup handler.
  *
  *  This handler is called when a thread is cancelled
  *  while blocked on the queue condition variable.
  *  It is used in queue_wait() and nft_queue_shutdown.
- *
  *----------------------------------------------------------------------
  */
 static void
@@ -244,10 +204,8 @@ queue_cleanup(void * arg)
 }
 
 /*----------------------------------------------------------------------
- *
  *  queue_wait() - Wait for an empty queue to get an item,
  *                 or for a full queue to get free space.
- *
  *----------------------------------------------------------------------
  */
 static void
@@ -295,18 +253,15 @@ queue_wait(nft_queue * q, int timeout)
 }
 
 /*----------------------------------------------------------------------
- *
  *  nft_queue_destroy()
  *
  *  Destroy the list and any queued items if the destroyer is set.
- *
  *----------------------------------------------------------------------
  */
-static void
+void
 nft_queue_destroy(nft_core * p)
 {
-    nft_queue * q = nft_queue_cast(p);
-    assert(q);
+    nft_queue * q = nft_queue_cast(p); assert(q);
     if (!q) return;
     
     /* If the destroyer is set, apply it to each item in the queue.
@@ -326,44 +281,40 @@ nft_queue_destroy(nft_core * p)
     nft_core_destroy(p);
 }
 
-
 /*----------------------------------------------------------------------
- *
- * nft_queue_create()
+ * nft_queue_create_f()
  *
  * Allocate the base struct which contains head and tail list pointers,
  * and various other data. Returns queue pointer to the caller,
  * or NULL if malloc fails.
  *
- * If limit is negative, it will be set to MIN_SIZE.
- * This will cause attempts to enqueue more than MIN_SIZE items
+ * If limit is negative, it will be set to NFT_QUEUE_MIN_SIZE.
+ * This will cause attempts to enqueue more than NFT_QUEUE_MIN_SIZE items
  * to block, rather than call malloc() to expand the queue.
  * So, if you wish to avoid having the queue malloc or realloc,
- * simply pass -1 as size, and adjust MIN_SIZE to suit your needs.
+ * simply pass -1 as size, and adjust NFT_QUEUE_MIN_SIZE to suit your needs.
  * If limit is zero, the queue may grow without limit.
  *
  * This returns the queue handle, but does not discard the reference
- * that was returned from nifty_core_create, so the queue refrence
+ * that was returned from nifty_core_create, so the queue reference
  * count will remain nonzero, until nft_queue_shutdown is called.
- *
- * Note that since the caller cannot pass in parameters for nft_core_create,
- * it is impractical to implement a subclass of nft_queue.
- *
  *----------------------------------------------------------------------
  */
-nft_queue_h
-nft_queue_create(int    limit,
-		 void (*destroyer)(void *))
+nft_queue *
+nft_queue_create_f(const char * class,
+		   size_t       size,
+		   int          limit,
+		   void      (* destroyer)(void *))
 {
-    nft_queue * q = nft_queue_cast(nft_core_create(nft_queue_class, sizeof(nft_queue)));
+    nft_queue * q = nft_queue_cast(nft_core_create(class, size));
     if (!q) return NULL;
 
     // Override the nft_core destructor with our own dtor.
     q->core.destroy = nft_queue_destroy;
     q->destroyer = destroyer;
-    q->limit = (limit < 0) ? MIN_SIZE : limit ;
+    q->limit = (limit < 0) ? NFT_QUEUE_MIN_SIZE : limit ;
     q->array = q->minarray;
-    q->size  = MIN_SIZE;
+    q->size  = NFT_QUEUE_MIN_SIZE;
     q->first = -1;
     q->next  = 0;
     q->nwait = 0;
@@ -376,12 +327,11 @@ nft_queue_create(int    limit,
 	nft_queue_discard(q);
 	return NULL;
     }
-    return nft_queue_handle(q);
+    return q;
 }
 
 
 /*----------------------------------------------------------------------
- *
  *  nft_queue_add_wait() - Add one entry on the end of the queue.
  *
  *  This function will wait for up to timeout seconds if the queue
@@ -392,7 +342,6 @@ nft_queue_create(int    limit,
  *  EINVAL	- not a valid queue.
  *  ENOMEM	- malloc failed
  *  ETIMEDOUT	- timeout reached
- *
  *----------------------------------------------------------------------
  */
 int
@@ -455,13 +404,11 @@ nft_queue_add(nft_queue_h h, void * item)
 }
 
 /*----------------------------------------------------------------------
- *
  *  nft_queue_pop_wait() - Remove and return the head item on the queue.
  *
  *  If the queue is empty, this call will block for up to timeout
  *  seconds, and return NULL if no item is queued in that time.
  *  Blocks indefinitely if the timeout is -1.
- *
  *----------------------------------------------------------------------
  */
 void *
@@ -517,7 +464,6 @@ nft_queue_pop( nft_queue_h h)
 }
 
 /*----------------------------------------------------------------------
- *
  *  nft_queue_shutdown()
  *
  *  Invalidate the queue and awaken blocked threads.
@@ -525,7 +471,6 @@ nft_queue_pop( nft_queue_h h)
  *
  *  Returns zero 	- on success.
  *  	    EINVAL	- not a valid queue.
- *
  *----------------------------------------------------------------------
  */
 int
@@ -534,28 +479,24 @@ nft_queue_shutdown(nft_queue_h h)
     nft_queue * q = nft_queue_lookup(h);
     if (!q) return EINVAL;
 
-    // nft_core_destroy() will delete the object's handle,
-    // so that no other references to this queue can be
-    // obtained via nft_queue_lookup. If the reference
-    // count is nonzero, it will decrement it, and free
-    // the object if the reference count becomes zero
-    // as a result.
+    // nft_core_destroy() will delete the object's handle, so that no
+    // new references to this queue can be obtained via nft_queue_lookup.
+    // If the reference count is nonzero, it will decrement it, and
+    // free the object if the reference count becomes zero as a result.
     //
-    // But, there should be at least two references to the
-    // queue: the initial reference from nft_queue_create,
-    // and the reference that we just created via _lookup.
-    // So this will not actually destroy the queue (and it
-    // would be very bad if it did.) The queue will likely
-    // be destroyed when we discard our reference, after
-    // waiting for all waiters to detach from the queue.
+    // But, there should be at least two references to the queue:
+    // the initial reference from nft_queue_create, and the reference
+    // that we just created via _lookup. So this will not actually
+    // destroy the queue (and it/ would be very bad if it did).
+    // The queue will be destroyed after we discard our reference,
+    // after waiting for all waiters to detach from the queue.
     //
     assert(q->core.reference_count >= 2);
     nft_core_destroy(&q->core);
 
     int rc = pthread_mutex_lock(&q->mutex); assert(rc == 0);
 
-    if (q->nwait > 0)
-    {
+    if (q->nwait > 0) {
 	pthread_cleanup_push(queue_cleanup, q);
 
 	// Waken any threads that are blocked in queue_wait().
@@ -571,17 +512,13 @@ nft_queue_shutdown(nft_queue_h h)
     }
     rc = pthread_mutex_unlock(&q->mutex); assert(rc == 0);
 
-    // This discard will invoke nft_queue_destroy.
-    assert(q->core.reference_count == 1);
     nft_queue_discard(q);
     return 0;
 }
 
 /*----------------------------------------------------------------------
- *
  *  nft_queue_count  -	Return the number of items in the queue.
  *			Returns -1 for an invalid handle.
- *
  *----------------------------------------------------------------------
  */
 int
@@ -599,10 +536,8 @@ nft_queue_count( nft_queue_h h)
 }
 
 /*----------------------------------------------------------------------
- *
  *  nft_queue_peek  -	Return the first item on the queue.
  *			Returns NULL on empty queue or invalid handle.
- *
  *----------------------------------------------------------------------
  */
 void *
@@ -620,12 +555,10 @@ nft_queue_peek( nft_queue_h h)
 }
 
 /*----------------------------------------------------------------------
- *
  *  nft_queue_set_destroyer
  *
  *  This function replaces the queue's current destroyer function.
  *  It returns the previous destroyer function.
- *
  *----------------------------------------------------------------------
  */
 void (*
@@ -960,7 +893,7 @@ t5( void)
     void	* value;
     int           rc;
 
-    fprintf(stderr, "t5(pop/shutdown): ");
+    fprintf(stderr, "t5 (pop/shutdown): ");
 
     q = nft_queue_create(1, NULL);
 
@@ -1016,7 +949,7 @@ t7( void)
     pthread_t    th;
     nft_queue_h  q;
 
-    fprintf(stderr, "t7(pop/cancel): ");
+    fprintf(stderr, "t7 (pop/cancel): ");
 
     q = nft_queue_create(1, NULL);
 

@@ -42,7 +42,7 @@ static pthread_once_t   CoreOnce  = PTHREAD_ONCE_INIT;
 static pthread_mutex_t	CoreMutex = PTHREAD_MUTEX_INITIALIZER;
 
 ////////////////////////////////////////////////////////////////////////////////
-// Private functions to manage handles
+// nft_handle APIs
 
 // FIXME For now, a _very_ simple handle table.
 #define MAX_HANDLE 100000
@@ -56,9 +56,6 @@ handle_init(void) {
     rc = pthread_mutex_init(&HandleMutex, NULL); assert(rc == 0);
 }
 
-
-////////////////////////////////////////////////////////////////////////////////
-// nft_handle APIs
 
 nft_handle
 nft_handle_alloc(void * vp)
@@ -116,17 +113,16 @@ nft_core_cast(void * vp, const char * class)
 {
     assert(class); // The class parameter is mandatory.
 
-    if (class && vp) {
-	// If vp really refers to a nft_core instance, class should be non-null.
+    if (vp && class) {
 	nft_core * this = vp;
-	assert(this->class);
 
+	// If vp really refers to a nft_core instance, class should be non-null.
+	assert(this->class);
 	if (this->class) {
 	    const char * require = class;
 	    const char * inquire = this->class;
 
-	    // Since the class is set by a string literal,
-	    // the pointers will often be identical.
+	    // Since class is a string literal, the pointers will often be identical.
 	    if (require == inquire) return this;
 
 	    // Test whether the required class is a prefix of the actual class.

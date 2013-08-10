@@ -31,7 +31,7 @@ LDLIBS		= -lpthread			# Solaris, Linux, AIX
 # You should not need to alter the definitions below.
 #
 LIB		= ../lib/libnifty.a
-SRCS		= nft_core.c nft_queue.c nft_task.c
+SRCS		= nft_core.c nft_pool.c nft_queue.c nft_task.c
 OBJS		= ${SRCS:.c=.o}
 EXES		= ${SRCS:.c=}
 DIST		= ../Nifty.tgz
@@ -40,6 +40,7 @@ all:	$(LIB)
 
 test:	$(EXES)
 	./nft_core
+	./nft_pool
 	./nft_queue  < /usr/share/dict/words	# Use /usr/dict/words on Solaris
 	./nft_task
 
@@ -56,6 +57,9 @@ $(LIB): $(OBJS)
 # Build the unit test programs
 #
 nft_core: nft_core.c ../include/nft_core.h $(LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
+
+nft_pool: nft_pool.c ../include/nft_pool.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
 nft_queue: nft_queue.c ../include/nft_queue.h $(LIB)

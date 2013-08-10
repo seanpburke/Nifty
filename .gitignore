@@ -2,5 +2,6 @@
 *.o
 src/nft_core
 src/nft_queue
+src/nft_pool
 src/nft_task
 lib/libnifty.a
