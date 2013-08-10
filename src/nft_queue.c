@@ -1,34 +1,25 @@
 /*******************************************************************************
  * (C) Xenadyne Inc, 2001-2013.	All Rights Reserved
- * 
+ *
  * Permission to use, copy, modify and distribute this software for
- * any purpose and without fee is hereby granted, provided that the 
+ * any purpose and without fee is hereby granted, provided that the
  * above copyright notice appears in all copies.
- * 
- * XENADYNE INC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, 
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.  
- * IN NO EVENT SHALL XENADYNE BE LIABLE FOR ANY SPECIAL, INDIRECT OR 
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM THE 
- * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, 
- * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN 
+ *
+ * XENADYNE INC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.
+ * IN NO EVENT SHALL XENADYNE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM THE
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- * 
+ *
  * File: nft_queue.c
  *
  * Description:
  *
  * Provides synchronized message queues for use in threaded applications.
- * Please refer to tmi_queue.h for a detailed description of the package.
- * 
- * TODO
- * ====
- *
- * We could add an _apply() method to enable users to safely iterate over
- * the queue. It may also be useful to provide _search() and _delete() methods.
- * A problem with _delete() is that it cannot be called from _apply() since it
- * must lock the list, which the _apply() call already has done. We could
- * define a _filter() method that would delete items as indicated by a 
- * caller-provided filter function. 
+ * Please refer to nft_queue.h for a detailed description of the package.
+ * Usage is illustrated by the unit test below (see #ifdef MAIN).
  *
  *******************************************************************************
  */
@@ -49,13 +40,18 @@
 NFT_DEFINE_HELPERS(nft_queue,);
 
 /* Here are some macros to help us manage the circular array.
- * Note that an empty queue is indicated by setting q->first = -1,
- * and this also requires that q->next = 0;
+ *
+ * An empty queue is indicated by setting q->first = -1,
+ * and this also requires that q->next = 0. The NEXT macro
+ * will work correctly on an empty queue, but the PREV macro
+ * must not be used on an empty queue.
+ *
  * Also note the distinction between FULL(q) and LIMIT(q).
  */
 #define EMPTY(q) (q->first < 0)
 #define FULL(q)  (q->next == q->first)
-#define NEXT(i)  ((i + 1)  % q->size)
+#define NEXT(i)  ((i + 1) % q->size)
+#define PREV(i)  ((i + q->size - 1) % q->size)
 #define COUNT(q) (EMPTY(q) ? 0 : ((q->next + ((q->next <= q->first) ? q->size : 0)) - q->first))
 #define LIMIT(q) ((q->limit > 0) && (COUNT(q) >= q->limit))
 #define VALID(q) (nft_queue_handle(q) != NULL)
@@ -173,7 +169,7 @@ queue_shrink(nft_queue * q)
 	q->array = realloc(q->array, nsize * sizeof(void*));
     }
     q->size = nsize;
-    
+
     assert(COUNT(q) == count);
 }
 
@@ -181,9 +177,9 @@ queue_shrink(nft_queue * q)
 /*----------------------------------------------------------------------
  *  queue_cleanup() - cancellation cleanup handler.
  *
- *  This handler is called when a thread is cancelled
- *  while blocked on the queue condition variable.
- *  It is used in queue_wait() and nft_queue_shutdown.
+ *  This handler is called when a thread is cancelled while blocked
+ *  on the queue condition variable. It is used in queue_wait() and
+ *  nft_queue_shutdown.
  *----------------------------------------------------------------------
  */
 static void
@@ -204,11 +200,20 @@ queue_cleanup(void * arg)
 }
 
 /*----------------------------------------------------------------------
- *  queue_wait() - Wait for an empty queue to get an item,
- *                 or for a full queue to get free space.
+ *  queue_wait() - Wait to enqueue or dequeue an item.
+ *
+ *  This function is only called when dequeuing from an empty queue,
+ *  or enqueueing to a queue that has reached its limit.
+ *
+ *  This function may block in pthread_cond_wait or _timedwait,
+ *  which are thread-cancellation points. It is cancellation-safe,
+ *  by virtue of the queue_cleanup function defined above.
+ *
+ *  Returns zero 	- on success.
+ *  	    ETIMEDOUT	- the timeout period expired
  *----------------------------------------------------------------------
  */
-static void
+static int
 queue_wait(nft_queue * q, int timeout)
 {
     // If the queue is empty, we'll wait for it to become non-EMPTY.
@@ -216,8 +221,8 @@ queue_wait(nft_queue * q, int timeout)
     //
     assert(EMPTY(q) || LIMIT(q));
     int empty = EMPTY(q);
-    int rc;
-    
+    int result;
+
     q->nwait++; // We are waiting for an item to be queued.
 
     // Push a cancellation cleanup handler in case we get cancelled.
@@ -230,26 +235,93 @@ queue_wait(nft_queue * q, int timeout)
 
 	// pthread_cond_timed_wait returns ETIMEDOUT on timeout.
 	while (VALID(q) && (empty ? EMPTY(q) : LIMIT(q)))
-	    if ((rc = pthread_cond_timedwait(&q->cond, &q->mutex, &abstime)) != 0)
+	    if ((result = pthread_cond_timedwait(&q->cond, &q->mutex, &abstime)) != 0)
 		break;
-	assert(rc == 0 || rc == ETIMEDOUT);
+	assert(result == 0 || result == ETIMEDOUT);
     }
-    else if (timeout < 0) { // Wait indefinitely. 
+    else if (timeout < 0) { // Wait indefinitely.
 	while (VALID(q) && (empty ? EMPTY(q) : LIMIT(q)))
-	    if ((rc = pthread_cond_wait(&q->cond, &q->mutex)) != 0)
+	    if ((result = pthread_cond_wait(&q->cond, &q->mutex)) != 0)
 		break;
-	assert(rc == 0);
+	assert(result == 0);
     }
     pthread_cleanup_pop(0); // Pop cleanup without executing it.
 
     q->nwait--; // We are no longer waiting to dequeue.
 
-    /* If queue was shut down while we were waiting, and we are
-     * the last waiter, signal the nft_queue_shutdown() thread.
-     */
+    // If queue was shut down while we were waiting, and we are
+    // the last waiter, signal the nft_queue_shutdown() thread.
+    //
     if (!VALID(q) && (q->nwait == 0)) {
-	rc = pthread_cond_signal(&q->cond); assert(rc == 0);
+	int rc = pthread_cond_signal(&q->cond); assert(rc == 0);
     }
+    return result;
+}
+
+/*----------------------------------------------------------------------
+ * nft_queue_enqueue()	- Enqueue an item.
+ *
+ * This function can append an item to the end of the list,
+ * or push the item onto the front of the list, depending on the
+ * 'which' parameter, which can be 'L' for LIFO, or 'F' for FIFO.
+ *
+ * Do NOT use this function unless you know what you are doing.
+ * The caller MUST hold the queue mutex while calling _enqueue.
+ * This would be a static function, except that it is needed by
+ * subclasses, such as nft_pool.
+ *
+ * This function calls queue_wait, which is a cancellation point.
+ *----------------------------------------------------------------------
+ */
+int
+nft_queue_enqueue(nft_queue * q,  void * item,  int timeout, char which)
+{
+    assert((which ==  'L') || (which == 'F')); // L for LastInFirstOut, F for FirstInFirstOut
+    int result = 0;
+
+    /* If a limit is set, and the limit has been reached,
+     * and timeout is nonzero, wait for an item to be popped.
+     */
+    if (LIMIT(q) && timeout) queue_wait(q, timeout);
+
+    // The queue may have been shutdown while we were waiting.
+    if (VALID(q))
+    {
+	// If the wait timed out, the list may still be at limit.
+	if (!LIMIT(q))
+	{
+	    // Attempt to grow the queue if necessary.
+	    if (GROW(q) && ((result = queue_grow(q)) != 0)) return result;
+
+	    assert((q->first != -1) || (q->next == 0)); // Are first and next consistent?
+
+	    // LIFO and FIFO work the same when the queue is empty.
+	    if (EMPTY(q)) {
+		q->array[0] = item;
+		q->first    = 0;
+		q->next     = 1;
+	    }
+	    else if ('L' == which) {
+		q->array[q->next] = item;
+		q->next = NEXT(q->next);
+	    }
+	    else if ('F' == which) {
+		q->first = PREV(q->first);
+		q->array[q->first] = item;
+	    }
+	    /* If threads are waiting in nft_queue_pop_wait, wake them.
+	     * Since the condition is shared between append and pop threads,
+	     * we need to do a broadcast.
+	     */
+	    if (q->nwait > 0) {
+		int rc = pthread_cond_broadcast(&q->cond); assert(rc == 0);
+	    }
+	}
+	else return ETIMEDOUT;
+    }
+    else return EINVAL;
+
+    return result;
 }
 
 /*----------------------------------------------------------------------
@@ -263,7 +335,7 @@ nft_queue_destroy(nft_core * p)
 {
     nft_queue * q = nft_queue_cast(p); assert(q);
     if (!q) return;
-    
+
     /* If the destroyer is set, apply it to each item in the queue.
      * The iteration logic is funky because when the queue is full,
      * q->first == q->next.
@@ -330,9 +402,8 @@ nft_queue_create_f(const char * class,
     return q;
 }
 
-
 /*----------------------------------------------------------------------
- *  nft_queue_add_wait() - Add one entry on the end of the queue.
+ *  nft_queue_add_wait() - Add one item to the end of the queue.
  *
  *  This function will wait for up to timeout seconds if the queue
  *  limit has been reached, or indefinitely when timeout is -1.
@@ -350,57 +421,49 @@ nft_queue_add_wait(nft_queue_h h,  void * item,  int timeout)
     nft_queue * q = nft_queue_lookup(h);
     if (!q) return EINVAL;
 
-    int result = 0;
-    int rc = pthread_mutex_lock(&q->mutex); assert(rc == 0);
-
-    assert((q->first != -1) || (q->next == 0));
-
-    /* If a limit is set, and the limit has been reached,
-     * and timeout is nonzero, wait for an item to be popped.
-     */
-    if (LIMIT(q) && timeout) queue_wait(q, timeout);
-
-    // The queue may have been shutdown while we were waiting.
-    if (VALID(q))
-    {
-	// If the wait timed out, the list may still be at limit.
-	if (!LIMIT(q))
-	{
-	    // Attempt to grow the queue if necessary.
-	    if (GROW(q) && ((result = queue_grow(q)) != 0)) goto finished;
-
-	    q->array[q->next] = item;
-	    q->next = NEXT(q->next);
-
-	    // Is queue no longer empty?
-	    if (EMPTY(q)) {
-		q->first = 0;
-		assert(q->next == 1);
-	    }
-	    /* If threads are waiting in nft_queue_pop_wait, wake them.
-	     * Since the condition is shared between append and pop threads,
-	     * we need to do a broadcast.
-	     */
-	    if (q->nwait > 0) {
-		rc = pthread_cond_broadcast(&q->cond); assert(rc == 0);
-	    }
-	}
-	else result = ETIMEDOUT;
-    }
-    else result = EINVAL;
-
-    assert((q->first != -1) || (q->next == 0));
-
-finished:
+    int rc     = pthread_mutex_lock(&q->mutex); assert(rc == 0);
+    int result = nft_queue_enqueue(q, item, timeout, 'L');
     rc = pthread_mutex_unlock(&q->mutex); assert(rc == 0);
+
     nft_queue_discard(q);
     return result;
 }
-
 int
 nft_queue_add(nft_queue_h h, void * item)
 {
     return nft_queue_add_wait(h, item, -1);
+}
+
+/*----------------------------------------------------------------------
+ *  nft_queue_push_wait() - Add one item to the front of the queue.
+ *
+ *  This function will wait for up to timeout seconds if the queue
+ *  limit has been reached, or indefinitely when timeout is -1.
+ *  The queue limit is ignored if timeout is zero.
+ *
+ *  Returns zero on success, otherwise:
+ *  EINVAL	- not a valid queue.
+ *  ENOMEM	- malloc failed
+ *  ETIMEDOUT	- timeout reached
+ *----------------------------------------------------------------------
+ */
+int
+nft_queue_push_wait(nft_queue_h h,  void * item,  int timeout)
+{
+    nft_queue * q = nft_queue_lookup(h);
+    if (!q) return EINVAL;
+
+    int rc     = pthread_mutex_lock(&q->mutex); assert(rc == 0);
+    int result = nft_queue_enqueue(q, item, timeout, 'F');
+    rc = pthread_mutex_unlock(&q->mutex); assert(rc == 0);
+
+    nft_queue_discard(q);
+    return result;
+}
+int
+nft_queue_push(nft_queue_h h, void * item)
+{
+    return nft_queue_push_wait(h, item, -1);
 }
 
 /*----------------------------------------------------------------------
@@ -456,9 +519,8 @@ nft_queue_pop_wait(nft_queue_h h, int timeout)
     nft_queue_discard(q);
     return item;
 }
-
 void *
-nft_queue_pop( nft_queue_h h)
+nft_queue_pop(nft_queue_h h)
 {
     return nft_queue_pop_wait(h, -1);
 }
@@ -700,6 +762,7 @@ main()
      * the user presses Ctrl-C, at which time the queues are
      * shutdown, and the program exits.
      */
+    fputs("multithread test, reading from stdin...\n", stderr);
 
     // Create the input and output queues.
     input_Q  = nft_queue_create(Q_LIMIT, free);
@@ -712,7 +775,7 @@ main()
     pthread_create(&output_thread, NULL, poll_output, 0);
     for (i = 0; i < NUM_WORKERS; i++)
 	pthread_create(&worker_threads[i], NULL, worker_thread, (void *) i);
-    
+
     // Wait for the input thread to finish.
     pthread_join(input_thread, NULL);
 
@@ -734,7 +797,7 @@ main()
     //
     assert(countin == countout);
     fprintf(stderr, "words in: %d	words out: %d\n", countin, countout);
-    
+
 #ifdef NDEBUG
     fprintf(stderr, "You must recompile this test driver without NDEBUG!\n");
 #else
@@ -778,7 +841,7 @@ t1( void)
     assert(nft_queue_pop(q)       == NULL);
     assert(nft_queue_peek(q)      == NULL);
     assert(nft_queue_count(q)     == -1);
-    
+
     nft_queue_shutdown(q);
 
     fprintf(stderr, "passed.\n");
@@ -844,7 +907,7 @@ append_thread(void * arg)
     nft_queue_h  q = arg;
     return (void*) (intptr_t) nft_queue_add(q, "second");
 }
-			      
+
 static void *
 pop_thread(void * arg)
 {

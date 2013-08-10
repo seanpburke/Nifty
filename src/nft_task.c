@@ -991,14 +991,14 @@ test_basic() {
  * thread. This means that, should any task be blocked, all subsequently scheduled tasks
  * will be delayed until the blocked task completes (if ever). The usual solution to this
  * problem, is to have your sheduled task submit a work item to a thread pool, in order
- * to guarantee that it cannot block.
+ * to guarantee that it cannot block the scheduler thread.
  *
- * Here, we illustrate a class that does this for you, use nft_task as a base class,
+ * Here, we illustrate a class that does this for you, using nft_task as a base class,
  * and incorporating a nft_pool to which all sheduled tasks are submitted when they
  * are ready to be executed.
  */
 typedef struct nft_task_pool {
-    nft_task task;
+    nft_task task;	// nft_task is our base class
 } nft_task_pool;
 
 // You must define the class string, showing its derivation from nft_task_class.
@@ -1040,7 +1040,7 @@ nft_task_pool_action(nft_task * p)
     // so it might make sense to use nft_pool_add_wait with timeout
     // set to zero, which causes _add_wait to fail immediately with
     // ETIMEDOUT, rather than block. But the problem in that case is,
-    // what to do with the schedule task that will not be executed?
+    // what to do with the task, since it will not be executed?
     //
     nft_pool_add(OurPool, task->task.function, task->task.argument);
 }

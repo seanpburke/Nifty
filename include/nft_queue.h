@@ -97,11 +97,36 @@ int	nft_queue_add(nft_queue_h queue, void * item);
 int	nft_queue_add_wait(nft_queue_h queue, void * item, int timeout);
 
 
+/*	Prepend an item to the head of the queue.
+ *  	If the queue limit had been reached, this function
+ *	will block until items are removed, creating free space.
+ *
+ *  	Returns zero 	- on success.
+ *		EINVAL	- not a valid queue.
+ *		ENOMEM	- malloc failed
+ */
+int	nft_queue_push(nft_queue_h queue, void * item);
+
+
+/*	Like nft_queue_push(), but if the queue limit is reached,
+ *	may wait until the queue shrinks, depending on the timeout:
+ *
+ *		timeout >   0 - wait up to timeout seconds.
+ *		timeout ==  0 - return ETIMEDOUT immediately.
+ *		timeout == -1 - wait indefinitely.
+ *
+ *  	Returns zero 	  - on success.
+ *		EINVAL	  - not a valid queue.
+ *		ENOMEM	  - malloc failed.
+ *		ETIMEDOUT - operation timed out.
+ */
+int	nft_queue_push_wait(nft_queue_h queue, void * item, int timeout);
+
+
 /*	Return the first item in the queue, or block indefinitely
  *	until an item is enqueued.
  */
 void  * nft_queue_pop(nft_queue_h queue);
-
 
 
 /*	Like nft_queue_pop(), but if the queue remains empty, 
@@ -159,7 +184,8 @@ void (*nft_queue_set_destroyer(nft_queue_h h, void (*destroyer)(void *)))(void *
  * The nft_queue package is completely functional, using only the APIs that
  * are declared above this point. But, you may wish to implement a subclass
  * based on nft_task. For example, the nft_pool package derives from nft_queue.
- * The declarations that follow, are _only_ needed to author subclasses.
+ * The declarations that follow, are _only_ needed to author subclasses,
+ * and they are generally not safe to use, unless you understand the risks.
  *
  ******************************************************************************
  */
@@ -195,9 +221,8 @@ nft_queue_create_f(const char * class,
                    size_t       size,
                    int          limit,
 		   void      (* destroyer)(void *));
-
-void
-nft_queue_destroy(nft_core * p);
+int  nft_queue_enqueue(nft_queue * q,  void * item,  int timeout, char which);
+void nft_queue_destroy(nft_core * p);
 
 // Declare helper functions nft_queue_cast, _handle, _lookup, and _discard.
 #define nft_queue_class nft_core_class ":nft_queue"
@@ -205,6 +230,5 @@ NFT_DECLARE_CAST(nft_queue)
 NFT_DECLARE_HANDLE(nft_queue)
 NFT_DECLARE_LOOKUP(nft_queue)
 NFT_DECLARE_DISCARD(nft_queue)
-
 
 #endif // nft_queue_header

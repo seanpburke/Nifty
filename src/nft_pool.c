@@ -48,7 +48,7 @@ typedef struct nft_pool		// Structure describing a thread pool.
 } nft_pool;
 
 // Define nft_pool_class, showing derivation from nft_queue.
-#define nft_pool_class nft_queue_class ":nft_queue"
+#define nft_pool_class nft_queue_class ":nft_pool"
 
 // Define helper functions nft_pool_cast, _handle, _lookup, and _discard.
 NFT_DEFINE_HELPERS(nft_pool,static)
@@ -135,7 +135,7 @@ nft_pool_destroy(nft_core * p)
  * is negative, the pool's queue will be limited to the minimum size defined
  * in nft_queue.h. If queue_limit is zero, there will be no limit upon the size
  * of the queue. Otherwise, nft_queue_add will block if the limit is reached.
- * 
+ *
  * The max_threads parameter will be forced to one if non-positive.
  *
  * If the stack_size is zero, it will be set to the default stack size.
@@ -181,6 +181,9 @@ nft_pool_create(int queue_limit, int max_threads, int stack_size)
  *	timeout  < 0	will wait indefinitely
  *      timeout == 0	will return ETIMEDOUT immediately
  *      timeout  > 0	will return ETIMEDOUT after timeout seconds
+ *
+ * This function may also return an error code from pthread_create,
+ * if a new pool thread cannot be created.
  *------------------------------------------------------------------------------
  */
 int
@@ -199,35 +202,28 @@ nft_pool_add_wait(nft_pool_h handle, int timeout, void (*function)(void *),  voi
 	nft_pool_discard(pool);
 	return ENOMEM;
     }
+
+    // We must hold the mutex when calling nft_queue_enqueue.
     int rc = pthread_mutex_lock(&pool->queue.mutex); assert(0 == rc);
 
-    // We want to decide before we enqueue, whether to spawn a new thread,
-    // since nft_queue_add will block if the queue is at its limit.
-    //
-    if (pool->idle_threads == 0  &&
-	pool->num_threads   < pool->max_threads)
+    // Enqueue the work item. This may block if the queue is at its limit.
+    int result = nft_queue_enqueue(&pool->queue, item, timeout, 'L');
+    if ((result == 0) &&
+	(pool->idle_threads == 0) &&
+	(pool->num_threads   < pool->max_threads))
     {
 	// Spawn a new thread, passing the pool's handle to nft_pool_thread.
 	pthread_t id;
-	if ((rc = pthread_create(&id, &pool->attr, nft_pool_thread, nft_pool_handle(pool))) == 0)
-	{
+	result = pthread_create(&id, &pool->attr, nft_pool_thread, nft_pool_handle(pool));
+	if (result == 0) {
 	    pool->num_threads++;
-	}
-	else if (pool->num_threads == 0)
-	{
-	    // Thread spawn failed, and no other threads are running, so return an error code.
-	    pthread_mutex_unlock(&pool->queue.mutex);
-	    nft_pool_discard(pool);	    
-	    return rc;
+	    pool->idle_threads++;
 	}
     }
     rc = pthread_mutex_unlock(&pool->queue.mutex); assert(0 == rc);
-    
-    // Enqueue the work item. This may block if the queue is at its limit.
-    rc = nft_queue_add_wait((nft_queue_h) handle, item, timeout);
 
-    nft_pool_discard(pool);	    
-    return rc;
+    nft_pool_discard(pool);
+    return result;
 }
 
 /*------------------------------------------------------------------------------
@@ -277,7 +273,7 @@ nft_pool_shutdown(nft_pool_h handle)
 {
     nft_pool * pool = nft_pool_lookup(handle);
     if (!pool) return EINVAL;
-    
+
     nft_queue_shutdown(nft_queue_handle(&pool->queue));
     nft_pool_discard(pool);
     return 0;
@@ -314,7 +310,7 @@ main(int argc, char *argv[])
 {
     nft_pool_h pool;
     int	       i, n;
-    
+
     // Do a basic smoke test.
     pool = nft_pool_create( 32,  // queue_limit
 			    10,  // max_threads
@@ -326,7 +322,7 @@ main(int argc, char *argv[])
     nft_pool_shutdown(pool);
     assert(nft_pool_lookup(pool) == NULL);
     fputs("Test 1 passed.\n\n", stderr);
-    
+
     // Test that destroy blocks until work is finished.
     pool = nft_pool_create(-1,  // queue_limit is NFT_QUEUE_MIN_SIZE
 			    2,  // max_threads
@@ -385,7 +381,7 @@ main(int argc, char *argv[])
 	sleep(1);
 	// assert(2 == pool->quit);
 	// assert(1 == pool->num_threads);
-	sleep(1); 
+	sleep(1);
 	// assert(0 == pool->num_threads);
 	fputs("Test 5 passed.\n\n", stderr);
     }
