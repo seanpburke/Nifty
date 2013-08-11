@@ -41,24 +41,75 @@
 static pthread_once_t   CoreOnce  = PTHREAD_ONCE_INIT;
 static pthread_mutex_t	CoreMutex = PTHREAD_MUTEX_INITIALIZER;
 
-////////////////////////////////////////////////////////////////////////////////
-// nft_handle APIs
+/*******************************************************************************
+ *
+ *		nft_handle
+ *
+ *******************************************************************************
+ */
+typedef struct nft_handle_map {
+    nft_handle handle;
+    void     * object;
+} nft_handle_map;
 
-// FIXME For now, a _very_ simple handle table.
-#define MAX_HANDLE 100000
-static void * Instance[MAX_HANDLE];
-static unsigned long NextHandle = 1;
-static pthread_mutex_t HandleMutex = PTHREAD_MUTEX_INITIALIZER;
+static nft_handle_map * HandleMap     = NULL;
+static unsigned         HandleMapSize = 1024; // must be a power of 2
+static pthread_mutex_t  HandleMutex   = PTHREAD_MUTEX_INITIALIZER;
+static unsigned long    NextHandle    = 1;
+
+// This limits the number of active handles, and thus the number
+// of nft_core instances. I would hope that 16 million will suffice.
+// If a process reaches this limit, nft_handle_alloc will return NULL,
+// just as if malloc had failed.
+//
+#define MAX_HANDLES (1 << 24)
+
+// Initialize the handle map and other globals.
 static void
 handle_init(void) {
     int rc;
     rc = pthread_mutex_init(&CoreMutex,   NULL); assert(rc == 0);
     rc = pthread_mutex_init(&HandleMutex, NULL); assert(rc == 0);
+
+    HandleMap = malloc(HandleMapSize * sizeof(nft_handle_map)); assert(HandleMap);
 }
 
+static unsigned
+handle_hash(nft_handle handle, unsigned modulo)
+{
+    // For speed's sake, we do binary modulo arithmetic,
+    // but this requires that modulo be a power of two.
+    return (unsigned long) handle & (modulo - 1); // handle % modulo;
+}
+
+// Grow the handle map by doubling when it becomes full.
+// Doubling ensures that no hash collisions will occur in the new map.
+static int
+handle_map_enlarge(void)
+{
+    // Refuse to allocate more than 16 millon handles.
+    if (HandleMapSize >= MAX_HANDLES) return 0;
+
+    unsigned         newsize = 2 * HandleMapSize;
+    nft_handle_map * newmap  = malloc(newsize * sizeof(nft_handle_map));
+    if (newmap) {
+	assert(memset(newmap,0,newsize));
+	for (unsigned i = 0; i < HandleMapSize; i++) {
+	    nft_handle handle = HandleMap[i].handle;
+	    // Confirm that this is not a hash collision.
+	    assert(newmap[handle_hash(handle, newsize)].handle == NULL);
+	    newmap[handle_hash(handle, newsize)] = HandleMap[handle_hash(handle, HandleMapSize)];
+	}
+	free(HandleMap);
+	HandleMap     = newmap;
+	HandleMapSize = newsize;
+	return 1;
+    }
+    return 0;
+}
 
 nft_handle
-nft_handle_alloc(void * vp)
+nft_handle_alloc(void * pointer)
 {
     nft_handle handle = NULL;
 
@@ -66,27 +117,36 @@ nft_handle_alloc(void * vp)
     int rc = pthread_once(&CoreOnce, handle_init); assert(rc == 0);
 
     rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-    if (NextHandle < MAX_HANDLE) {
-	Instance[NextHandle] = vp;
-	handle = (void*) NextHandle++;
-    }
-    else {
-	assert(!"need a larger handle table");
-    }
-    rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
 
+    // Scan for the next open slot in the HandleMap
+rescan:
+    for (unsigned i = 0; i < HandleMapSize; i++, NextHandle++) {
+	if (NextHandle) {
+	    unsigned index = handle_hash((nft_handle)NextHandle, HandleMapSize);
+	    if (HandleMap[index].handle == NULL) {
+		handle = (nft_handle) NextHandle++;
+		HandleMap[index] = (nft_handle_map){ handle, pointer };
+		break;
+	    }
+	}
+    }
+    // If the table is full, and we are able to enlarge it, try again.
+    if (!handle && handle_map_enlarge())
+	goto rescan;
+    rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
     return handle;
 }
 
 void *
 nft_handle_lookup(nft_handle handle)
 {
-    void * result = NULL;
+    unsigned long index  = ((unsigned long) handle % HandleMapSize);
+    void        * result = NULL;
 
     // NULL is an invalid handle by definition.
     if (handle) {
 	int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-	result = Instance[(unsigned long) handle];
+	result = HandleMap[index].object;
 	rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
     }
     return result; 
@@ -95,19 +155,24 @@ nft_handle_lookup(nft_handle handle)
 void
 nft_handle_delete(nft_handle handle, void * ref)
 {
+    unsigned long index  = ((unsigned long) handle % HandleMapSize);
+    
     // NULL is an invalid handle by definition.
     if (handle) {
 	int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
 	// Sanity check - Does this handle really refer to ref?
-	assert(ref == Instance[(unsigned long) handle]);
-	Instance[(unsigned long) handle] = NULL;
+	assert(HandleMap[index].object == ref);
+	HandleMap[index] = (nft_handle_map){ NULL, NULL };
 	rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// nft_core APIs
-
+/*******************************************************************************
+ *
+ *		nft_core Public APIs
+ *
+ *******************************************************************************
+ */
 void *
 nft_core_cast(void * vp, const char * class)
 {
@@ -138,11 +203,17 @@ nft_core_cast(void * vp, const char * class)
 nft_core *
 nft_core_create(const char * class, size_t size)
 {
+    assert(class && size);
     nft_core * this = malloc(size);
     if (this) {
-	*this = (nft_core) { class, nft_handle_alloc(this), 1, nft_core_destroy };
-	assert(this->class);
-	assert(this->handle);
+	nft_handle handle = nft_handle_alloc(this);
+	if (handle) {
+	    *this = (nft_core) { class, handle, 1, nft_core_destroy };
+	}
+	else { // nft_handle_alloc failed - memory exhausted or too many active handles.
+	    free(this);
+	    this = NULL;
+	}
     }
     return this;
 }

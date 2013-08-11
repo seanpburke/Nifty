@@ -14,11 +14,18 @@
  *
  * NAME: nft_hash.c
  *
- * This is a generic hash table packate. It is used by nft_core
- * to associate handles with nft_core instances, but it is useful
- * for a variety of other purposes. The header file nft_hash.h
- * documents this package's public API, and the unit test code
- * below (look for #ifdef MAIN) provides examples of usage.
+ * This is a generic hash table packate. It is useful for a variety
+ * of purposes. The header file nft_hash.h documents this package's
+ * public API, and the unit test code below (look for #ifdef MAIN)
+ * provides examples of usage.
+ *
+ * Unlike most other Nifty packages, this does not have any pthread
+ * features - you will notice that the hash table has no mutex.
+ * I've found that it's rarely useful to have internal locks in a
+ * collection class, because I nearly always need to synchronize
+ * adding an object to a collection with changes to the object,
+ * or to other data. So the internal mutex virtually always turns
+ * out to be superfluous.
  * 
  * IMPLEMENTATION NOTES
  *
@@ -539,13 +546,6 @@ nft_hash_analyze(nft_hash	*table)
 #define MAXKEYS		1000000
 char   *keys[MAXKEYS];
 int     nkeys = 0;
-
-// Predicate to test nft_hash_search_filter().
-static int
-compare_int(void *key, void *val, void *pred_arg)
-{
-    return (val == pred_arg);
-}
 
 int
 main(int argc, char *argv[])

@@ -173,7 +173,6 @@ queue_shrink(nft_queue * q)
     assert(COUNT(q) == count);
 }
 
-
 /*----------------------------------------------------------------------
  *  queue_cleanup() - cancellation cleanup handler.
  *
@@ -185,8 +184,7 @@ queue_shrink(nft_queue * q)
 static void
 queue_cleanup(void * arg)
 {
-    nft_queue * q = nft_queue_cast(arg);
-    assert(q);
+    nft_queue * q = nft_queue_cast(arg); assert(q);
 
     /* If queue had been shutdown while we were waiting, and we
      * are the last waiter, signal the nft_queue_shutdown() thread,
@@ -205,6 +203,7 @@ queue_cleanup(void * arg)
  *  This function is only called when dequeuing from an empty queue,
  *  or enqueueing to a queue that has reached its limit.
  *
+ *  The caller MUST hold the queue mutex while calling queue_wait.
  *  This function may block in pthread_cond_wait or _timedwait,
  *  which are thread-cancellation points. It is cancellation-safe,
  *  by virtue of the queue_cleanup function defined above.
@@ -259,18 +258,24 @@ queue_wait(nft_queue * q, int timeout)
 }
 
 /*----------------------------------------------------------------------
- * nft_queue_enqueue()	- Enqueue an item.
+ *  nft_queue_enqueue()	- Enqueue an item.
  *
- * This function can append an item to the end of the list,
- * or push the item onto the front of the list, depending on the
- * 'which' parameter, which can be 'L' for LIFO, or 'F' for FIFO.
+ *  This function can append an item to the end of the list,
+ *  or push the item onto the front of the list, depending on the
+ *  'which' parameter, which can be 'L' for LIFO, or 'F' for FIFO.
  *
- * Do NOT use this function unless you know what you are doing.
- * The caller MUST hold the queue mutex while calling _enqueue.
- * This would be a static function, except that it is needed by
- * subclasses, such as nft_pool.
+ *  Do NOT use this function unless you know what you are doing.
+ *  The caller MUST hold the queue mutex while calling _enqueue.
+ *  This would be a static function, except that it is needed by
+ *  subclasses, such as nft_pool.
  *
- * This function calls queue_wait, which is a cancellation point.
+ *  This function calls queue_wait, which is a cancellation point.
+ *
+ *  Returns:	zero		On success
+ *		ENOMEM  	Memory exhausted
+ *		ETIMEDOUT	Operation timed out
+ *		ESHUTDOWN	Queue has been shutdown
+ *
  *----------------------------------------------------------------------
  */
 int
@@ -319,7 +324,7 @@ nft_queue_enqueue(nft_queue * q,  void * item,  int timeout, char which)
 	}
 	else return ETIMEDOUT;
     }
-    else return EINVAL;
+    else return ESHUTDOWN;
 
     return result;
 }
@@ -345,7 +350,7 @@ nft_queue_destroy(nft_core * p)
 	    q->destroyer(q->array[idx]);
 
     int rc = pthread_mutex_destroy(&q->mutex); assert(rc == 0);
-    rc     = pthread_cond_destroy (&q->cond);  assert(rc == 0);
+    rc     = pthread_cond_destroy (&q->cond);  // FIXME assert(rc == 0);
 
     // Free array only if it points to malloced memory.
     if (q->array != q->minarray) free(q->array);
@@ -410,9 +415,10 @@ nft_queue_create_f(const char * class,
  *  The queue limit is ignored if timeout is zero.
  *
  *  Returns zero on success, otherwise:
- *  EINVAL	- not a valid queue.
+ *  EINVAL	- not a valid queue
  *  ENOMEM	- malloc failed
  *  ETIMEDOUT	- timeout reached
+ *  ESHUTDOWN	- queue has been shutdown
  *----------------------------------------------------------------------
  */
 int
@@ -445,6 +451,7 @@ nft_queue_add(nft_queue_h h, void * item)
  *  EINVAL	- not a valid queue.
  *  ENOMEM	- malloc failed
  *  ETIMEDOUT	- timeout reached
+ *  ESHUTDOWN	- queue has been shutdown
  *----------------------------------------------------------------------
  */
 int
@@ -470,8 +477,9 @@ nft_queue_push(nft_queue_h h, void * item)
  *  nft_queue_pop_wait() - Remove and return the head item on the queue.
  *
  *  If the queue is empty, this call will block for up to timeout
- *  seconds, and return NULL if no item is queued in that time.
- *  Blocks indefinitely if the timeout is -1.
+ *  seconds, and return NULL if no item is queued in that time,
+ *  or if the queue shuts down while waiting.  Blocks indefinitely
+ *  if the timeout is -1.
  *----------------------------------------------------------------------
  */
 void *
@@ -812,18 +820,16 @@ main()
 static void
 t1( void)
 {
-    nft_queue_h  q;
-    int i;
-
     fprintf(stderr, "t1 (create/destroy):");
 
     // Create an unlimited queue.
-    q = nft_queue_create(0, free);
+    nft_queue_h q = nft_queue_create(0, free);
 
     // With the queue empty, test the pop timeout.
     nft_queue_pop_wait(q, 1);
 
     // Test the _append(), _count() and _peek() operations.
+    int   i;
     for ( i = 0 ; Strings[ i] != NULL ; i++)
     {
 	nft_queue_add( q, strdup( Strings[ i]));
@@ -831,16 +837,12 @@ t1( void)
     }
     assert(strcmp(nft_queue_peek(q), Strings[0]) == 0);
 
-    // Set the queue limit, and test the append timeout.
-    // FIXME q->limit = i;
-    // assert(nft_queue_add_wait(q, "", 0) == ETIMEDOUT);
-
     // Shutdown the queue, and verify invalid queue returns.
     nft_queue_shutdown(q);
     assert(nft_queue_add(q, 0) == EINVAL);
-    assert(nft_queue_pop(q)       == NULL);
-    assert(nft_queue_peek(q)      == NULL);
-    assert(nft_queue_count(q)     == -1);
+    assert(nft_queue_pop(q)    == NULL);
+    assert(nft_queue_peek(q)   == NULL);
+    assert(nft_queue_count(q)  == -1);
 
     nft_queue_shutdown(q);
 
@@ -848,34 +850,39 @@ t1( void)
 }
 
 /*
- * t2 - Test append/pop operations.
+ * t2 - Test add/push/pop operations.
  */
 static void
 t2( void)
 {
-    nft_queue_h  q;
-    int i;
-    void * ss;
-
     fprintf(stderr, "t2 (append/pop): ");
+    void      * ss;
+    nft_queue_h q = nft_queue_create(0, free);
 
-    q = nft_queue_create(0, free);
-
-    for ( i = 0 ; Strings[ i] != NULL ; i++)
+    // Test add/pop.
+    for (int i = 0 ; Strings[i] != NULL ; i++)
 	nft_queue_add( q, strdup(Strings[i]));
 
-    i = 0;
-    while ((ss = nft_queue_pop_wait(q, 0)) != NULL)
-    {
-	if (strcmp(ss, Strings[i++]))
-	{
+    for (int i = 0; ((ss = nft_queue_pop_wait(q, 0)) != NULL); i++) {
+	if (strcmp(ss, Strings[i])) {
+	    fprintf(stderr, " failed.\n");
+	    return;
+	}
+	free(ss);
+    }
+
+    // Test push/pop.
+    for (int i = 0 ; Strings[i] != NULL ; i++)
+	nft_queue_push( q, strdup(Strings[i]));
+
+    for (int i = nft_queue_count(q); ((ss = nft_queue_pop_wait(q, 0)) != NULL); i--) {
+	if (strcmp(ss, Strings[i-1])) {
 	    fprintf(stderr, " failed.\n");
 	    return;
 	}
 	free(ss);
     }
     nft_queue_shutdown( q);
-
     fprintf(stderr, " passed.\n");
 }
 
@@ -885,24 +892,20 @@ t2( void)
 static void
 t3( void)
 {
-    nft_queue_h  q;
-    int i;
-
     fprintf(stderr, "t3 (append/destroy): ");
 
-    q = nft_queue_create(0, free);
+    nft_queue_h q = nft_queue_create(0, free);
 
-    for ( i = 0 ; Strings[ i] != NULL ; i++)
-	nft_queue_add( q, strdup( Strings[ i]));
+    for (int i = 0 ; Strings[ i] != NULL ; i++)
+	nft_queue_add( q, strdup(Strings[i]));
 
     nft_queue_shutdown( q);
-
     fprintf(stderr, "passed.\n");
 }
 
 
 static void *
-append_thread(void * arg)
+add_thread(void * arg)
 {
     nft_queue_h  q = arg;
     return (void*) (intptr_t) nft_queue_add(q, "second");
@@ -915,35 +918,40 @@ pop_thread(void * arg)
     return nft_queue_pop_wait(q, -1);
 }
 
-
 /*
  * t4 - Test queue shutdown during append.
  */
 static void
 t4( void)
 {
-    pthread_t     th;
-    nft_queue_h  q;
-    void	* value;
-    int           rc;
-
     fprintf(stderr, "t4 (append/shutdown): ");
 
-    q = nft_queue_create(1, NULL);
-
-    // The queue limit is one, so the thread will block.
+    // Create a queue that is limited to one item.
+    nft_queue_h q = nft_queue_create(1, NULL);
     nft_queue_add(q, "first");
-    pthread_create(&th, 0, append_thread, q);
+
+    // The queue limit is one, so this append should timeout immediately.
+    int rc = nft_queue_add_wait(q, "", 0);
+    assert(ETIMEDOUT == rc);
+
+    // The queue limit is one, so this thread will block.
+    pthread_t th;
+    rc = pthread_create(&th, 0, add_thread, q); assert(0 == rc);
     sleep(1);
 
-    // Shut down the queue, and join the append_thread.
+    // Shut down the queue, and join the add_thread.
     nft_queue_shutdown(q);
-    rc = pthread_join(th, &value);
-    assert(0      == rc);
-    assert(EINVAL == (long) value);
+
+    // Join with add_thread.
+    void * value;
+    rc = pthread_join(th, &value); assert(0 == rc);
+
+    // nft_queue_add or _push return ESHUTDOWN
+    // if the queue shuts down while they are waiting.
+    assert(ESHUTDOWN == (long) value);
+
     fprintf(stderr, "passed.\n");
 }
-
 
 /*
  * t5 - Test queue shutdown during pop.
@@ -951,23 +959,22 @@ t4( void)
 static void
 t5( void)
 {
-    pthread_t     th;
-    nft_queue_h  q;
-    void	* value;
-    int           rc;
-
     fprintf(stderr, "t5 (pop/shutdown): ");
 
-    q = nft_queue_create(1, NULL);
+    nft_queue_h q = nft_queue_create(1, NULL);
 
     // The queue is empty, so the thread will block.
-    pthread_create(&th, 0, pop_thread, q);
+    pthread_t th;
+    int rc = pthread_create(&th, 0, pop_thread, q); assert(0 == rc);
     sleep(1);
 
-    // Shut down the queue, and join the pop_thread.
+    // Shut down the queue.
     nft_queue_shutdown(q);
-    rc = pthread_join(th, &value);
-    assert(0    == rc);
+
+    // Join the pop_thread.
+    // nft_queue_pop returns NULL on timeout, invalid queue, etc.
+    void * value;
+    rc = pthread_join(th, &value); assert(0 == rc);
     assert(NULL == value);
     fprintf(stderr, "passed.\n");
 }
@@ -980,23 +987,27 @@ static void
 t6( void)
 {
 #ifndef WIN32	// no pthread_cancel() on WIN32
-    pthread_t     th;
-    nft_queue_h  q;
 
     fprintf(stderr, "t6 (append/cancel): ");
 
-    q = nft_queue_create(1, NULL);
-
-    // The queue limit is one, so the thread will block.
+    nft_queue_h q = nft_queue_create(1, NULL);
     nft_queue_add(q, "first");
-    pthread_create(&th, 0, append_thread, q);
+
+    // The queue limit is one, so the add_thread will block.
+    pthread_t th;
+    int rc = pthread_create(&th, 0, add_thread, q); assert(0 == rc);
     sleep(1);
-    pthread_cancel(th);
-    sleep(1);
+
+    // Cancel and join the add_thread.
+    void * value;
+    rc = pthread_cancel(th); assert(0 == rc);
+    rc = pthread_join(th, &value); assert(0 == rc);
+    assert(PTHREAD_CANCELED == value);
+
+    // We should still be able to pop the first item.
     assert(strcmp("first", (char*) nft_queue_pop(q)) == 0);
 
     nft_queue_shutdown(q);
-
     fprintf(stderr, "passed.\n");
 #endif // WIN32
 }
@@ -1009,22 +1020,25 @@ static void
 t7( void)
 {
 #ifndef WIN32	// no pthread_cancel() on WIN32
-    pthread_t    th;
-    nft_queue_h  q;
 
     fprintf(stderr, "t7 (pop/cancel): ");
 
-    q = nft_queue_create(1, NULL);
+    nft_queue_h q = nft_queue_create(1, NULL);
 
-    // The queue is empty, so the thread will block.
-    pthread_create(&th, 0, pop_thread, q);
-    sleep(1);
-    pthread_cancel(th);
+    // The queue is empty, so pop_thread will block.
+    pthread_t    th;
+    int rc = pthread_create(&th, 0, pop_thread, q); assert(0 == rc);
     sleep(1);
     assert(nft_queue_pop_wait(q, 0) == NULL);
 
-    nft_queue_shutdown(q);
+    // Cancel and join the pop_thread.
+    void * value;
+    rc = pthread_cancel(th); assert(0 == rc);
+    rc = pthread_join(th, &value); assert(0 == rc);
+    assert(PTHREAD_CANCELED == value);
 
+    assert(nft_queue_pop_wait(q, 0) == NULL);
+    nft_queue_shutdown(q);
     fprintf(stderr, "passed.\n");
 #endif // WIN32
 }
