@@ -15,11 +15,11 @@
  *
  * File:  nft_task.h
  *
- * PURPOSE
- *
  * This package provides a facility to schedule a task to execute asyncronously
  * at a specified time in the future. The caller is given a handle that can be
- * used to cancel the task prior to execution.
+ * used to cancel the task prior to execution. The APIs are documented in this
+ * header file, but you should also review the examples in nft_task.c, in the
+ * unit test code (see #ifdef MAIN).
  *
  * CAVEATS
  *
@@ -29,7 +29,8 @@
  * timely execution of other scheduled tasks. If the task will perform any
  * blocking operations, such as gethostbyname_r(), the task should submit the
  * work to a thread pool (see nft_pool.h), so that the task scheduler thread
- * doesn't block.
+ * doesn't block. There is an example in nft_task.c unit-test section, which
+ * demonstrates a subclass of nft_task that does this.
  *
  ******************************************************************************
  */

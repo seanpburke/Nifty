@@ -110,7 +110,7 @@ nft_pool_thread(void * arg)
 	pool->idle_threads++;
 	rc = pthread_mutex_unlock(&pool->queue.mutex); assert(0 == rc);
     }
-    pthread_cleanup_pop(1);
+    pthread_cleanup_pop(1); // executes pool_cleanup
     return NULL;
 }
 

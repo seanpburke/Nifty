@@ -15,8 +15,6 @@
  *
  * File:  nft_pool.h
  *
- * PURPOSE
- *
  * This package provides a facility to submit tasks to a thread pool.
  * The thread pool is associated with one or more threads that execute
  * the tasks asynchronously.
@@ -68,8 +66,9 @@ nft_pool_h nft_pool_create(int queue_limit, int max_threads, int stack_size);
  * See nft_pool_add_wait below for a timeout option.
  *
  * Returns zero on success, otherwise:
- *	EINVAL The pool argument is not a valid thread pool.
- *	ENOMEM malloc() failed.
+ *	EINVAL    - The pool handle is not valid.
+ *	ENOMEM    - malloc() failed.
+ *      ESHUTDOWN - the queue has been shut down.
  */
 int nft_pool_add(nft_pool_h pool, void (*function)(void *), void * argument);
 
@@ -81,7 +80,6 @@ int nft_pool_add(nft_pool_h pool, void (*function)(void *), void * argument);
  *	timeout  < 0 :	will wait indefinitely
  *      timeout == 0 :	will return ETIMEDOUT immediately
  *      timeout  > 0 :	will return ETIMEDOUT after timeout seconds
- *------------------------------------------------------------------------------
  */
 int
 nft_pool_add_wait(nft_pool_h handle, int timeout, void (*function)(void *),  void * argument);
