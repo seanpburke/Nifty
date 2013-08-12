@@ -48,50 +48,51 @@
  */
 typedef struct nft_queue_h * nft_queue_h;
 
-/*	Create an empty queue.
+/*  Create an empty queue.
  *
- * 	Arguments:
- *
- *	limit   When the number of items in the queue reaches this limit,
- *		further additions will block until space is freed.
+ *  limit	When the number of items in the queue reaches this limit,
+ *  		further additions will block until space is freed.
  *      	The queue grows by doubling, so setting the limit to a
  *      	power of two will be most efficient. If limit is zero,
  *      	the queue may grow until memory is exhausted. If limit
  *      	is negative, the queue cannot grow from its initial size.
  *
- *	destroyer  Frees queued items when the queue is destroyed.
+ *  destroyer	Frees queued items when the queue is destroyed.
  *
- *	Returns	NULL on malloc failure.
+ *  Returns	NULL on malloc failure.
  *
- *	Note that nft_queue create is actually a convenience macro.
- *	The function nft_create_f accepts class and size arguments,
- *      to enable subclasses to be authored, based on nft_queue.
- *      The nft_pool package is an example of a nft_queue subclass.
+ *  Note that nft_queue create is actually a convenience macro.
+ *  The function nft_create_f accepts class and size arguments,
+ *  to enable subclasses to be authored, based on nft_queue.
+ *  The nft_pool package is an example of a nft_queue subclass.
  */
 #define          nft_queue_create(limit,destroyer) \
 nft_queue_handle(nft_queue_create_f(nft_queue_class, sizeof(nft_queue), limit, destroyer));
 
 
-/*	Append an item to the tail of the queue.
- *  	If the queue limit had been reached, this function
- *	will block until items are removed, creating free space.
+/*  Append an item to the tail of the queue.
+ *  If the queue limit had been reached, this function
+ *  will block until items are removed, creating free space.
  *
- *  	Returns zero 	  - on success.
+ *  Returns 	zero 	  - on success.
  *		EINVAL	  - not a valid queue.
  *		ENOMEM	  - malloc failed
  *              ESHUTDOWN - the queue has been shut down.
+ *
+ *  Note that you will usually get EINVAL if the queue has been shut down.
+ *  ESHUTDOWN is returned only when the shutdown occurs while waiting.
  */
 int	nft_queue_add(nft_queue_h queue, void * item);
 
 
-/*	Like nft_queue_add(), but if the queue limit is reached,
- *	may wait until the queue shrinks, depending on the timeout:
+/*  Like nft_queue_add(), but if the queue limit is reached,
+ *  may wait until the queue shrinks, depending on the timeout:
  *
- *		timeout >   0 - wait up to timeout seconds.
- *		timeout ==  0 - return ETIMEDOUT immediately.
- *		timeout == -1 - wait indefinitely.
- *	
- *  	Returns zero      - on success.
+ *  	timeout >   0 - wait up to timeout seconds.
+ *  	timeout ==  0 - return ETIMEDOUT immediately.
+ *  	timeout == -1 - wait indefinitely.
+ *
+ *  Returns:	zero      - on success.
  *		EINVAL    - not a valid queue.
  *		ENOMEM    - malloc failed.
  *		ETIMEDOUT - operation timed out.
@@ -100,87 +101,93 @@ int	nft_queue_add(nft_queue_h queue, void * item);
 int	nft_queue_add_wait(nft_queue_h queue, void * item, int timeout);
 
 
-/*	Prepend an item to the head of the queue.
- *  	If the queue limit had been reached, this function
- *	will block until items are removed, creating free space.
+/*  Prepend an item to the head of the queue.
+ *  If the queue limit had been reached, this function
+ *  will block until items are removed, creating free space.
  *
- *  	Returns zero      - on success.
+ *  Returns	zero      - on success.
  *		EINVAL    - not a valid queue.
  *		ENOMEM    - malloc failed
  *              ESHUTDOWN - the queue has been shut down.
+ *
+ *  Note that you will usually get EINVAL if the queue has been shut down.
+ *  ESHUTDOWN is returned only when the shutdown occurs while waiting.
  */
 int	nft_queue_push(nft_queue_h queue, void * item);
 
 
-/*	Like nft_queue_push(), but if the queue limit is reached,
- *	may wait until the queue shrinks, depending on the timeout:
+/*  Like nft_queue_push(), but if the queue limit is reached,
+ *  may wait until the queue shrinks, depending on the timeout:
  *
- *		timeout >   0 - wait up to timeout seconds.
- *		timeout ==  0 - return ETIMEDOUT immediately.
- *		timeout == -1 - wait indefinitely.
+ *	timeout >   0 - wait up to timeout seconds.
+ *	timeout ==  0 - return ETIMEDOUT immediately.
+ *	timeout == -1 - wait indefinitely.
  *
- *  	Returns zero 	  - on success.
+ *  Returns	zero 	  - on success.
  *		EINVAL	  - not a valid queue.
  *		ENOMEM	  - malloc failed.
  *		ETIMEDOUT - operation timed out.
  *              ESHUTDOWN - the queue has been shut down.
+ *
+ *  Note that you will usually get EINVAL if the queue has been shut down.
+ *  ESHUTDOWN is returned only when the shutdown occurs while waiting.
  */
 int	nft_queue_push_wait(nft_queue_h queue, void * item, int timeout);
 
 
-/*	Return the first item in the queue, or block indefinitely
- *	until an item is enqueued.
+/*  Return the first item in the queue, or block indefinitely
+ *  until an item is enqueued.
  */
 void  * nft_queue_pop(nft_queue_h queue);
 
 
-/*	Like nft_queue_pop(), but if the queue remains empty, 
- *	this call may return NULL, depending on the timeout:
+/*  Like nft_queue_pop(), but if the queue remains empty, 
+ *  this call may return NULL, depending on the timeout:
  *
- *		timeout >   0 - return NULL after timeout seconds.
- *		timeout ==  0 - return NULL immediately.
- *		timeout == -1 - wait indefinitely.
+ *  	timeout >   0 - return NULL after timeout seconds.
+ *  	timeout ==  0 - return NULL immediately.
+ *  	timeout == -1 - wait indefinitely.
  */
 void  * nft_queue_pop_wait(nft_queue_h queue, int timeout);
 
 
-/*	Shutdown an active queue.
+/*  Shutdown an active queue.
  *
- *      This call invalidates the queue and destroys it.
+ *  This call invalidates the queue and destroys it.
  *
- *	Shutdown invalidates this queue, so that attempts to
- *      invoke a nft_queue API with this queue handle will
- *      fail with the error EINVAL.
+ *  Shutdown invalidates this queue, so that attempts to
+ *  invoke a nft_queue API with this queue handle will
+ *  fail with the error EINVAL.
  *
- *      Shutdown awakens threads that are blocked on this queue.
- *      Threads that were blocked in a call to nft_queue_pop_wait
- *      will receive the return value NULL, and threads blocked
- *	in nft_queue_add or _push will receive ESHUTDOWN.
+ *  Shutdown awakens threads that are blocked on this queue.
+ *  Threads that were blocked in a call to nft_queue_pop_wait
+ *  will receive the return value NULL, and threads blocked
+ *  in nft_queue_add or _push will receive ESHUTDOWN.
  *     
- *      Once the queue has been released, the destroyer function
- *	is applied to all the items remaining in the queue,
- *      and then the queue itself is freed.
+ *  Once the queue has been released, the destroyer function
+ *  is applied to all the items remaining in the queue,
+ *  and then the queue itself is freed.
  *
- *	nft_queue_shutdown returns when this process is complete.
+ *  nft_queue_shutdown returns when this process is complete.
  *
- *	Returns zero 	- on success.
+ *  Returns 	zero 	- on success.
  *  		EINVAL	- not a valid queue.
  */
 int	nft_queue_shutdown( nft_queue_h q);
 
 
-/*	How many items are currently in the queue?
- *	Returns -1 if the queue is invalid.
+/*  How many items are currently in the queue?
+ *  Returns -1 if the queue is invalid.
  */
 int	nft_queue_count(nft_queue_h queue);
 
-/*	Return the first item on the queue, without popping it.
- *	Returns NULL if the queue is empty or invalid.
+/*  Return the first item on the queue, without popping it.
+ *  Returns NULL if the queue is empty or invalid.
  */
 void  * nft_queue_peek(nft_queue_h q);
 
-/*	Replaces the queue's current destroyer function.
- *	Returns the previous destroyer function.
+/*  Replaces the queue's current destroyer function.
+ *  Returns the previous destroyer function.
  */
 void (*nft_queue_set_destroyer(nft_queue_h h, void (*destroyer)(void *)))(void *);
 
@@ -210,17 +217,17 @@ void (*nft_queue_set_destroyer(nft_queue_h h, void (*destroyer)(void *)))(void *
 typedef struct nft_queue
 {
     nft_core            core;
-    pthread_mutex_t	mutex;	// Lock to protect queue.
-    pthread_cond_t	cond;	// Signals waiting threads.
     unsigned		nwait;	// Number of waiting threads.
     int			first;	// First item in array.
     int			next;	// Next free item in array.
     int			size;	// Size of array.
     int			limit;	// Maximum number of items.
+    pthread_mutex_t	mutex;	// Lock to protect queue.
+    pthread_cond_t	cond;	// Signals waiting threads.
     void	     ** array;	// Array holding queued items.
     void	      * minarray[NFT_QUEUE_MIN_SIZE]; // Initial array
 
-    void		(*destroyer)(void * item);
+    void	     (* destroyer)(void * item);
 } nft_queue;
 
 nft_queue *
@@ -228,8 +235,9 @@ nft_queue_create_f(const char * class,
                    size_t       size,
                    int          limit,
 		   void      (* destroyer)(void *));
-int  nft_queue_enqueue(nft_queue * q,  void * item,  int timeout, char which);
-void nft_queue_destroy(nft_core * p);
+int    nft_queue_enqueue(nft_queue * q, void * item, int timeout, char which);
+void * nft_queue_dequeue(nft_queue * q, int timeout);
+void   nft_queue_destroy(nft_core * p);
 
 // Declare helper functions nft_queue_cast, _handle, _lookup, and _discard.
 #define nft_queue_class nft_core_class ":nft_queue"

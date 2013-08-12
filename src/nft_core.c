@@ -71,7 +71,9 @@ handle_init(void) {
     rc = pthread_mutex_init(&CoreMutex,   NULL); assert(rc == 0);
     rc = pthread_mutex_init(&HandleMutex, NULL); assert(rc == 0);
 
-    HandleMap = malloc(HandleMapSize * sizeof(nft_handle_map)); assert(HandleMap);
+    size_t memsize = HandleMapSize * sizeof(nft_handle_map);
+    if ((HandleMap = malloc(memsize))) memset(HandleMap,0,memsize);
+    assert(HandleMap);
 }
 
 static unsigned
@@ -87,13 +89,16 @@ handle_hash(nft_handle handle, unsigned modulo)
 static int
 handle_map_enlarge(void)
 {
-    // Refuse to allocate more than 16 millon handles.
-    if (HandleMapSize >= MAX_HANDLES) return 0;
+    unsigned newsize = HandleMapSize << 1;
+    size_t   memsize = newsize * sizeof(nft_handle_map);
+    
+    // Refuse to allocate a ridiculous number of handles.
+    assert(newsize <= MAX_HANDLES);
+    if (newsize > MAX_HANDLES) return 0;
 
-    unsigned         newsize = 2 * HandleMapSize;
-    nft_handle_map * newmap  = malloc(newsize * sizeof(nft_handle_map));
+    nft_handle_map * newmap = malloc(memsize);
     if (newmap) {
-	assert(memset(newmap,0,newsize));
+	memset(newmap,0,memsize);
 	for (unsigned i = 0; i < HandleMapSize; i++) {
 	    nft_handle handle = HandleMap[i].handle;
 	    // Confirm that this is not a hash collision.
@@ -375,6 +380,16 @@ basic_tests()
     nft_core_discard(p);
     nft_core * r = nft_core_lookup(h);
     assert(r == NULL);
+
+    // Test handle_map_enlarge
+    int        n = 10000;
+    nft_core * parray[n];
+    for (int i = 0; i < n; i++) {
+	parray[i] = nft_core_create(nft_core_class, sizeof(nft_core));
+    }
+    for (int i = 0; i < n; i++) {
+	nft_core_discard(parray[i]);
+    }
 }
 
 int

@@ -1155,13 +1155,13 @@ int
 main(int argc, char *argv[])
 {
     // Test the heap-sort implementation.
-//    test_heap();
+    test_heap();
+
+    // Test the nft_task user APIs
+    test_basic();
 
     // Test the subclass implementation
     test_nft_task_pool();
-
-    // Test the nft_task user APIs
-//    test_basic();
 
 #ifdef NDEBUG
     printf("You must recompile this test driver without NDEBUG!\n");

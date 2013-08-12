@@ -48,7 +48,8 @@ typedef struct nft_pool_h * nft_pool_h;
  *
  * The stack_size argument sets the maximum size in bytes of the worker
  * thread's stack region. It can be zero, in which case platform default
- * is used, otherwise it must be 16K or more.
+ * is used. If nonzero but less than NFT_POOL_MIN_STACK_SIZE, it will be
+ * forced to the minimum.
  *
  * If either argument does not satisfy the required minimum, it will be
  * silently increased to the minimum value.
@@ -56,7 +57,7 @@ typedef struct nft_pool_h * nft_pool_h;
  * Returns NULL on a malloc failure.
  */
 nft_pool_h nft_pool_create(int queue_limit, int max_threads, int stack_size);
-
+#define  NFT_POOL_MIN_STACK_SIZE 16*1024
 
 /* nft_pool_add:  Submit a work item to the pool.
  *
@@ -69,13 +70,17 @@ nft_pool_h nft_pool_create(int queue_limit, int max_threads, int stack_size);
  *	EINVAL    - The pool handle is not valid.
  *	ENOMEM    - malloc() failed.
  *      ESHUTDOWN - the queue has been shut down.
+ *
+ * Note that you will usually get EINVAL if the pool has been
+ * shut down. ESHUTDOWN is only returned when the shutdown
+ * occurs while this call is waiting to queue the item.
  */
 int nft_pool_add(nft_pool_h pool, void (*function)(void *), void * argument);
 
 /* nft_pool_add_wait: Enqueue a work item, with a timeout.
  *
- * This function work like nft_pool_add, except that when the pool's
- * work item queue is at its limit:
+ * This function work like nft_pool_add, except that 
+ * when the pool's queue has reached its limit:
  *
  *	timeout  < 0 :	will wait indefinitely
  *      timeout == 0 :	will return ETIMEDOUT immediately
@@ -87,15 +92,25 @@ nft_pool_add_wait(nft_pool_h handle, int timeout, void (*function)(void *),  voi
 
 /* nft_pool_shutdown: Free resources associated with thread pool.
  *
- * If work items are in the pool, the calling thread blocks until all
- * of the tasks have been performed. While waiting, the calling thread
- * may be cancelled, in which case the pool will be freed when and
- * if the last worker thread exits.
+ * After the call to shutdown, no new work items may be enqueued.
+ * Pool threads will continue to process enqueued items that remain,
+ * and the pool will be destroyed when the last pool thread exits.
+ * Depending on the timeout parameter, the caller can elect to:
+ *
+ *	timeout  < 0	Wait indefinitely for processing to finish.
+ *      timeout == 0	Return immediately.
+ *      timeout  > 0	Wait up to timeout seconds.
  *
  * Returns zero on success, otherwise:
- *	EINVAL The pool argument is not a valid thread pool.
- * 
+ *	EINVAL     The pool argument is not a valid handle.
+ *	ETIMEDOUT  The timeout interval expired.
+ *      ESHUTDOWN  The pool has already been shut down.
+ *
+ * Note that, as with nft_pool_add_wait, you will usually
+ * get EINVAL if the queue has been shut down. It is not
+ * often possible to distinguish the handle of a queue
+ * that has been shutdown, from an invalid handle.
  */
-int nft_pool_shutdown(nft_pool_h pool);
+int nft_pool_shutdown(nft_pool_h pool, int timeout);
 
 #endif // nft_pool_header
