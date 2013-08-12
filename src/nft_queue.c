@@ -204,7 +204,7 @@ queue_wait_cleanup(void * arg)
 
     // Decrement the waiters count.
     q->nwait--;
-    
+
     /* If queue had been shutdown while we were waiting, and we are the last waiter,
      * signal the nft_queue_shutdown() thread, which waits until all remaining waiters
      * have left the queue.
@@ -310,6 +310,7 @@ nft_queue_enqueue(nft_queue * q,  void * item,  int timeout, char which)
     if (LIMIT(q) && timeout) queue_wait(q, timeout);
 
     // The queue may have been shutdown while we were waiting.
+    // Do not permit enqueues after the queue has been shutdown.
     if (!SHUTDOWN(q))
     {
 	// If the wait timed out, the list may still be at limit.
@@ -370,31 +371,29 @@ nft_queue_dequeue(nft_queue * q, int timeout)
     void * item = NULL;
 
     // If the queue is empty and timeout is set, wait for an enqueue.
-    if (EMPTY(q) && timeout) queue_wait(q, timeout);
+    // Do not allow dequeues to block after the queue has shut down.
+    if (EMPTY(q) && !SHUTDOWN(q) && timeout) queue_wait(q, timeout);
 
-    // The queue may have been shutdown while we were waiting.
-    if (!SHUTDOWN(q)) {
-	// If the wait timed out, the list may still be empty.
-	if (!EMPTY(q)) {
-	    // Pop the first item in the queue.
-	    item     = q->array[q->first];
-	    q->first = NEXT(q->first);
+    // If the wait timed out, the list may still be empty.
+    if (!EMPTY(q)) {
+	// Pop the first item in the queue.
+	item     = q->array[q->first];
+	q->first = NEXT(q->first);
 
-	    // If the queue appears to be FULL, set queue to empty state.
-	    if (FULL(q)) {
-		q->first = -1;
-		q->next  =  0;
-	    }
-	    /* If there could be threads blocked in nft_queue_add_wait(),
-	     * wake them now. Since the condition is shared between append
-	     * and pop threads, we need to do a broadcast.
-	     */
-	    if (q->nwait && q->limit) {
-		int rc = pthread_cond_broadcast(&q->cond); assert(rc == 0);
-	    }
-	    // If the queue is less than one quarter full, shrink it by half.
-	    if (SHRINK(q)) queue_shrink(q);
+	// If the queue appears to be FULL, set queue to empty state.
+	if (FULL(q)) {
+	    q->first = -1;
+	    q->next  =  0;
 	}
+	/* If there could be threads blocked in nft_queue_add_wait(),
+	 * wake them now. Since the condition is shared between append
+	 * and pop threads, we need to do a broadcast.
+	 */
+	if (q->nwait && q->limit) {
+	    int rc = pthread_cond_broadcast(&q->cond); assert(rc == 0);
+	}
+	// If the queue is less than one quarter full, shrink it by half.
+	if (SHRINK(q)) queue_shrink(q);
     }
     return item;
 }
@@ -618,7 +617,7 @@ nft_queue_shutdown(nft_queue_h h)
 	queue_shutdown_cleanup(q);
 	return ESHUTDOWN;
     }
-    
+
     pthread_cleanup_push(queue_shutdown_cleanup, q);
     if (q->nwait > 0) {
 	// Waken any threads that are blocked in queue_wait().
@@ -806,7 +805,7 @@ main()
     t6();
     t7();
 
-    /* Multithreaded test - best run on a multprocessor machine.
+    /* Multithreaded test - best run on a multi-core host.
      *
      * In this test, we create a work pipeline consisting of two queues.
      * The input thread reads lines of text from standard input,
@@ -814,11 +813,13 @@ main()
      *
      * A number of worker threads pop strings from the input queue,
      * convert them to upper case, and append them to the output queue.
-     *
      * An output thread pops strings from the output queue and
-     * prints them to standard output. The test concludes when
-     * the user presses Ctrl-C, at which time the queues are
-     * shutdown, and the program exits.
+     * prints them to standard output.
+     *
+     * Note that if you want to set up something like this,
+     * you should look at the nft_pool package. nft_pool
+     * implements the input_Q-plus-worker-threads part of
+     * this demo.
      */
     fputs("multithread test, reading from stdin...\n", stderr);
 
@@ -835,9 +836,11 @@ main()
 	pthread_create(&worker_threads[i], NULL, worker_thread, (void *) i);
 
     // Wait for the input thread to finish.
-    pthread_join(input_thread, NULL);
+    void * thread_return;
+    pthread_join(input_thread, &thread_return);
+    assert(thread_return == NULL);
 
-    // Shutdown pipeline.
+    // Shutdown pipeline - there may still be enqueued items.
     fputs("shutdown pipeline\n", stderr);
     rc = nft_queue_shutdown(input_Q);    assert(rc == 0);
     assert(nft_queue_count(input_Q)  == -1);
@@ -846,14 +849,15 @@ main()
 
     // Now join with the workers and output thread.
     for (i = 0; i < NUM_WORKERS; i++) {
-	rc = pthread_join(worker_threads[i], NULL);  assert(rc == 0);
+	rc = pthread_join(worker_threads[i], &thread_return);  assert(rc == 0);
+	assert(thread_return == NULL);
     }
-    rc = pthread_join(output_thread, NULL);  assert(rc == 0);
+    rc = pthread_join(output_thread, &thread_return);  assert(rc == 0);
+    assert(thread_return == NULL);
 
-    // This test may fail, because we did not ensure that
+    // The counts may not match, because we did not ensure that
     // the queues had been emptied before we called nft_shutdown.
     //
-    assert(countin == countout);
     fprintf(stderr, "words in: %d	words out: %d\n", countin, countout);
 
 #ifdef NDEBUG

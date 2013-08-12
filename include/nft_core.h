@@ -87,8 +87,8 @@ static NFT_DEFINE_DISCARD(subclass)
 // Do NOT call these nft_handle_* functions unless you know what you are doing.
 // In particular, note that nft_handle_lookup does not increment the reference
 // count, so the pointer you get could become stale at any time.
-nft_handle nft_handle_alloc(void * vp);
-void     * nft_handle_lookup(nft_handle h);
-void       nft_handle_delete(nft_handle h, void *vp);
+nft_handle nft_handle_alloc(nft_core * object);
+nft_core * nft_handle_lookup(nft_handle h);
+void       nft_handle_delete(nft_handle h);
 
 #endif // nft_core_header

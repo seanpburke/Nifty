@@ -48,8 +48,11 @@ static pthread_mutex_t	CoreMutex = PTHREAD_MUTEX_INITIALIZER;
  *******************************************************************************
  */
 typedef struct nft_handle_map {
+    // It's not strictly necessary to store handle/object pairs,
+    // because the object contains its handle. But in this case,
+    // some redundancy makes the system much more resilient.
     nft_handle handle;
-    void     * object;
+    nft_core * object;
 } nft_handle_map;
 
 static nft_handle_map * HandleMap     = NULL;
@@ -91,7 +94,7 @@ handle_map_enlarge(void)
 {
     unsigned newsize = HandleMapSize << 1;
     size_t   memsize = newsize * sizeof(nft_handle_map);
-    
+
     // Refuse to allocate a ridiculous number of handles.
     assert(newsize <= MAX_HANDLES);
     if (newsize > MAX_HANDLES) return 0;
@@ -101,6 +104,10 @@ handle_map_enlarge(void)
 	memset(newmap,0,memsize);
 	for (unsigned i = 0; i < HandleMapSize; i++) {
 	    nft_handle handle = HandleMap[i].handle;
+
+	    // Confirm that the handle and object are consistent.
+	    assert(handle == HandleMap[i].object->handle);
+
 	    // Confirm that this is not a hash collision.
 	    assert(newmap[handle_hash(handle, newsize)].handle == NULL);
 	    newmap[handle_hash(handle, newsize)] = HandleMap[handle_hash(handle, HandleMapSize)];
@@ -114,7 +121,7 @@ handle_map_enlarge(void)
 }
 
 nft_handle
-nft_handle_alloc(void * pointer)
+nft_handle_alloc(nft_core * object)
 {
     nft_handle handle = NULL;
 
@@ -123,14 +130,13 @@ nft_handle_alloc(void * pointer)
 
     rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
 
-    // Scan for the next open slot in the HandleMap
-rescan:
+rescan: // Scan for the next open slot in the HandleMap
     for (unsigned i = 0; i < HandleMapSize; i++, NextHandle++) {
 	if (NextHandle) {
 	    unsigned index = handle_hash((nft_handle)NextHandle, HandleMapSize);
 	    if (HandleMap[index].handle == NULL) {
 		handle = (nft_handle) NextHandle++;
-		HandleMap[index] = (nft_handle_map){ handle, pointer };
+		HandleMap[index] = (nft_handle_map){ handle, object };
 		break;
 	    }
 	}
@@ -142,34 +148,40 @@ rescan:
     return handle;
 }
 
-void *
+nft_core *
 nft_handle_lookup(nft_handle handle)
 {
-    unsigned long index  = ((unsigned long) handle % HandleMapSize);
-    void        * result = NULL;
+    int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
 
     // NULL is an invalid handle by definition.
-    if (handle) {
-	int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-	result = HandleMap[index].object;
-	rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
-    }
-    return result; 
+    unsigned   index  = handle_hash(handle, HandleMapSize);
+    nft_core * object = handle ? HandleMap[index].object : NULL;
+
+    // Sanity check - Does this handle really refer to this object?
+    assert(!object || (handle == object->handle));
+
+    rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
+    return object;
 }
 
 void
-nft_handle_delete(nft_handle handle, void * ref)
+nft_handle_delete(nft_handle handle)
 {
-    unsigned long index  = ((unsigned long) handle % HandleMapSize);
-    
+    int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
+
     // NULL is an invalid handle by definition.
     if (handle) {
-	int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-	// Sanity check - Does this handle really refer to ref?
-	assert(HandleMap[index].object == ref);
+	unsigned long index = handle_hash(handle, HandleMapSize);
+
+	// Sanity checks - If the handle were already deleted,
+	// a different handle could be hashed to this index.
+	// But a handle should not be deleted twice.
+	assert(handle == HandleMap[index].handle);
+	assert(handle == HandleMap[index].object->handle);
+
 	HandleMap[index] = (nft_handle_map){ NULL, NULL };
-	rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
     }
+    rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
 }
 
 /*******************************************************************************
@@ -230,7 +242,7 @@ nft_core_destroy(nft_core * p)
     assert(this != NULL);
     if (this) {
 	// Delete the object's handle, so that no new references can be obtained via _lookup.
-	nft_handle_delete(this->handle, this);
+	nft_handle_delete(this->handle);
 	this->handle = NULL;
 
 	// If the reference count is not zero, it means that nft_core_destroy was called directly,

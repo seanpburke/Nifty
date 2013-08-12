@@ -1,16 +1,16 @@
 /*******************************************************************************
  * (C) Xenadyne Inc. 2002-2013.  All rights reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software for
- * any purpose and without fee is hereby granted, provided that the 
+ * any purpose and without fee is hereby granted, provided that the
  * above copyright notice appears in all copies.
- * 
- * XENADYNE INC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, 
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.  
- * IN NO EVENT SHALL XENADYNE BE LIABLE FOR ANY SPECIAL, INDIRECT OR 
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM THE 
- * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, 
- * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN 
+ *
+ * XENADYNE INC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.
+ * IN NO EVENT SHALL XENADYNE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM THE
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  * File: nft_pool.c
@@ -70,7 +70,7 @@ pool_thread_cleanup(void * arg)
 {
     nft_pool * pool = nft_pool_cast(arg); assert(pool);
 
-    int rc = pthread_mutex_lock(&pool->queue.mutex); assert(rc == 0);    
+    int rc = pthread_mutex_lock(&pool->queue.mutex); assert(rc == 0);
 
     // If the pool is shutting down and we are the last pool thread
     // to finish, signal the thread that is waiting in nft_pool_shutdown.
@@ -87,22 +87,23 @@ pool_thread_cleanup(void * arg)
  * nft_pool_thread	- Thread start function to serve the pool's work queue.
  *
  * nft_pool_add generates a fresh protected reference to the pool,
- * while holding the pool mutex, and passes that reference to us.
+ * and passes that reference to us.
+ * pool->num_threads, but it has not incremented pool->idle_threads.
  *------------------------------------------------------------------------------
  */
 static void *
 nft_pool_thread(void * arg)
 {
     nft_pool * pool = nft_pool_cast(arg);
+    int rc          = pthread_mutex_lock(&pool->queue.mutex); assert(rc == 0);
 
-    int rc = pthread_mutex_lock(&pool->queue.mutex); assert(rc == 0);
-
-    // Note that the pool has a new, idle worker.
-    pool->num_threads++;
-    pool->idle_threads++;
-    
     // Unless shutting down, wait for up to one second for work to arrive, then exit.
-    int         timeout = SHUTDOWN(pool) ? 0 : 1 ;
+    int timeout = SHUTDOWN(pool) ? 0 : 1 ;
+
+    // Increment pool->idle_threads before we block in nft_queue_dequeue.
+    // nft_pool_add has already incremented num_threads, after spawning this thread.
+    pool->idle_threads++;
+
     work_item * item;
     while ((item = nft_queue_dequeue(&pool->queue, timeout)))
     {
@@ -133,7 +134,7 @@ nft_pool_thread(void * arg)
     }
     pool->idle_threads--;
     pool->num_threads--;
-    
+
     // If the pool is shutting down and we are the last pool thread
     // to finish, signal the thread that is waiting in nft_pool_shutdown.
     if (pool->num_threads == 0 && SHUTDOWN(pool))
@@ -237,7 +238,6 @@ nft_pool_add_wait(nft_pool_h handle, int timeout, void (*function)(void *),  voi
 	nft_pool_discard(pool);
 	return ENOMEM;
     }
-
     // We must hold the mutex when calling nft_queue_enqueue.
     int rc = pthread_mutex_lock(&pool->queue.mutex); assert(0 == rc);
 
@@ -256,12 +256,13 @@ nft_pool_add_wait(nft_pool_h handle, int timeout, void (*function)(void *),  voi
 	    (pool->num_threads  <  pool->max_threads))
 	{
 	    // Create a fresh reference to the pool, which we will pass to the thread.
-	    nft_pool * newref = nft_pool_lookup(nft_pool_handle(pool)); assert(newref);
-
-	    // Discard the new reference if pthread_create fails.
+	    // Discard the clone reference if pthread_create fails.
+	    nft_pool * clone = nft_pool_lookup(nft_pool_handle(pool)); assert(clone);
 	    pthread_t  id;
-	    if ((result = pthread_create(&id, &pool->attr, nft_pool_thread, newref)))
-		nft_pool_discard(newref);
+	    if (!(result = pthread_create(&id, &pool->attr, nft_pool_thread, clone)))
+		pool->num_threads++;
+	    else
+		nft_pool_discard(clone);
 	}
     }
     else free(item); // The item was not queued.
@@ -365,8 +366,18 @@ nft_pool_shutdown(nft_pool_h handle, int timeout)
 #define sleep(n) _sleep(n*1000)
 #endif
 
-void clear_flag(void * arg) { // Simply zeroes an int*.
-    *(int*) arg = 0;
+int flags[10] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+
+// Clear the indicated flag immediately.
+void clear_flag(void * arg) {
+    flags[(long)arg] = 0;
+}
+// Clear the indicated flag after sleeping
+void sleeper(void * arg) {
+    long flag = (long) arg;
+    //fprintf(stderr,"sleeping for %ld seconds...\n", flag);
+    sleep(flag);
+    flags[flag] = 0;
 }
 void test_exit(void * arg) { // An obnoxious function that calls pthread_exit.
     pthread_exit(0);
@@ -380,22 +391,22 @@ main(int argc, char *argv[])
 {
     int rc;
 
-    // Do a basic smoke test.
-    fputs("Test 1: ", stderr);
+    fputs("Test 1: basic test", stderr);
     nft_pool_h pool = nft_pool_create( 32,  // queue_limit
 				       10,  // max_threads
 				 128*1024); // stack size
     assert(NULL != pool);
-    rc = nft_pool_add(pool, (void(*)(void*)) puts, "Foo"); assert(rc == 0);
-    rc = nft_pool_add(pool, (void(*)(void*)) puts, "Bar"); assert(rc == 0);
-    rc = nft_pool_add(pool, (void(*)(void*)) puts, "Faz"); assert(rc == 0);
-    rc = nft_pool_shutdown(pool, 1);
-    assert(nft_pool_lookup(pool) == NULL);
-    
+    flags[0] = 1, flags[1] = 1, flags[2] = 1;
+    rc = nft_pool_add(pool, clear_flag, (void*) 0); assert(rc == 0);
+    rc = nft_pool_add(pool, clear_flag, (void*) 1); assert(rc == 0);
+    rc = nft_pool_add(pool, clear_flag, (void*) 2); assert(rc == 0);
+    rc = nft_pool_shutdown(pool, 1); assert(rc == 0);
+
     // We asked shutdown to wait, but it should not time out.
     assert(rc != ETIMEDOUT || !"shutdown timed out");
     assert(rc == 0);
-
+    assert(nft_pool_lookup(pool) == NULL);
+    assert(flags[0] == 0 && flags[1] == 0 && flags[2] == 0);
     fputs("passed.\n", stderr);
 
     // Test that shutdown blocks until work is finished.
@@ -403,18 +414,12 @@ main(int argc, char *argv[])
     pool = nft_pool_create(-1,  // queue_limit is NFT_QUEUE_MIN_SIZE
 			    2,  // max_threads
 			    0); // default stack size
-    rc = nft_pool_add(pool, (void(*)(void*)) sleep, (void*) 2); assert(rc == 0);
-    rc = nft_pool_add(pool, (void(*)(void*)) sleep, (void*) 2); assert(rc == 0);
-    rc = nft_pool_add(pool, (void(*)(void*)) sleep, (void*) 2); assert(rc == 0);
-
-    // Note that you can pass nft_pool handles to nft_queue APIs,
-    // since that is nft_pool's superclass, but you have to cast it.
-    // Invalid casts will be detected - review nft_core lookup.
-    assert(nft_queue_count((nft_queue_h) pool) == 3);
-
-    rc = nft_pool_shutdown(pool, -1);
-    assert(rc == 0);
-    
+    flags[0] = 1, flags[1] = 1, flags[2] = 1;
+    rc = nft_pool_add(pool, sleeper, (void*) 1); assert(rc == 0);
+    rc = nft_pool_add(pool, sleeper, (void*) 2); assert(rc == 0);
+    rc = nft_pool_add(pool, sleeper, (void*) 3); assert(rc == 0);
+    rc = nft_pool_shutdown(pool, -1);            assert(rc == 0);
+    assert(flags[1] == 0 && flags[2] == 0 && flags[3] == 0);
     fputs("passed.\n", stderr);
 
 #ifndef WIN32
@@ -429,11 +434,10 @@ main(int argc, char *argv[])
     assert(0 == rc);
     sleep(1);
     // Verify that the pool is still functional afterward.
-    int flag = -1;
-    rc = nft_pool_add(pool, clear_flag, &flag); assert(0 == rc);
-    sleep(1);  // FIXME - fails without this sleep.
+    flags[0] = 1;
+    rc = nft_pool_add(pool, clear_flag, (void*) 0); assert(0 == rc);
     rc = nft_pool_shutdown(pool, -1); assert(0 == rc);
-    assert(flag == 0);
+    assert(flags[0] == 0);
     fputs("passed\n", stderr);
 
     /* Test cancellation in nft_pool_shutdown.
