@@ -35,19 +35,20 @@ LIB	= $(LIBDIR)/libnifty.a
 SRCS	= nft_core.c nft_hash.c nft_pool.c nft_queue.c nft_task.c
 OBJS	= $(SRCS:.c=.o)
 EXES	= $(SRCS:.c=)
-DIST	= ../Nifty.tgz
+VERSION = 0.9
+DISTDIR = Nifty-$(VERSION)
+DIST	= ../../Nifty-$(VERSION).tgz
 
 all:	$(LIB)
 
 test:	$(EXES)
-	./nft_hash   < /usr/share/dict/words	# Use /usr/dict/words on Solaris
 	./nft_core
 	./nft_queue  < /usr/share/dict/words
 	./nft_pool
 	./nft_task
+	./nft_hash   < /usr/share/dict/words
 
 dist:    $(DIST)
-
 
 $(LIB): $(LIBDIR) $(OBJS)
 	ar -ruv $@ $(OBJS)
@@ -73,11 +74,18 @@ nft_queue: nft_queue.c ../include/nft_queue.h $(LIB)
 nft_task: nft_task.c ../include/nft_task.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
-$(DIST): clean
-	tar zcvf $@ -C ../.. --exclude '.git' --exclude '*~' --exclude '*.tgz' Nifty
+$(DIST): clean $(DISTDIR)
+	tar cvf -                \
+	$(DISTDIR)/README.txt    \
+	$(DISTDIR)/include/*.h   \
+	$(DISTDIR)/src/*.c       \
+	$(DISTDIR)/src/Makefile  | gzip -c > $@
+
+$(DISTDIR):
+	ln -s ../../Nifty $(DISTDIR)
 
 $(LIBDIR):
 	mkdir -p $(LIBDIR)
 
 clean:
-	- rm *.o $(LIB) $(EXES) $(DIST)
+	- rm *.o $(LIB) $(EXES) $(DISTDIR)
