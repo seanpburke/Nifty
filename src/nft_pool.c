@@ -18,10 +18,12 @@
  * Description:	Thread pool package.
  *
  * This package provides thread pools, also known as "work queues".
- * It illustrates Nifty's object-oriented style of development,
- * using the nft_queue package as the base class. The unit test
- * at the bottom of this file (see #ifdef MAIN) demonstrates how
- * to use this package.
+ * The APIs are documented in nft_pool.h. The unit test at the bottom
+ * of this file (see #ifdef MAIN) demonstrates how to use this package.
+ *
+ * This package illustrates Nifty's object-oriented style of development,
+ * using the nft_queue package as the base class. The README.txt section
+ * on object-oriented development explains how this works.
  *
  *******************************************************************************
  */
@@ -375,7 +377,7 @@ void clear_flag(void * arg) {
 // Clear the indicated flag after sleeping
 void sleeper(void * arg) {
     long flag = (long) arg;
-    //fprintf(stderr,"sleeping for %ld seconds...\n", flag);
+    fprintf(stderr,"\n\tsleeping for %ld seconds...", flag);
     sleep(flag);
     flags[flag] = 0;
 }
@@ -422,11 +424,10 @@ main(int argc, char *argv[])
     assert(flags[1] == 0 && flags[2] == 0 && flags[3] == 0);
     fputs("passed.\n", stderr);
 
-#ifndef WIN32
     /* The following tests fail on WIN32, either because cancellation
      * is not supported, or the cleanup handlers aren't run on thread exit.
      */
-
+#ifndef WIN32
     // The test_exit function will call pthread_exit from the pool thread.
     fputs("Test 3: Call pthread_exit from pool thread ", stderr);
     pool = nft_pool_create(-1, 0, 0); assert(pool != NULL);
@@ -492,7 +493,7 @@ main(int argc, char *argv[])
 #endif // WIN32
 
     // Stress/Performance test - push many work items through the queue.
-    int n = 10000;
+    int n = 100000;
     fprintf(stderr, "Test 5: processing %d tasks...", n);
     pool = nft_pool_create(-1, 2, 0);
     for (int i = 0; i < n; i++) {

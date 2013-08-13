@@ -335,9 +335,9 @@ nft_queue_enqueue(nft_queue * q,  void * item,  int timeout, char which)
 		q->first = PREV(q->first);
 		q->array[q->first] = item;
 	    }
-	    /* If threads are waiting in nft_queue_pop_wait, wake them.
-	     * Since the condition is shared between append and pop threads,
-	     * we need to do a broadcast.
+	    /* If threads are waiting in nft_queue_dequeue, wake them.
+	     * Since the condition is shared between _enqueue and _dequeue
+	     * threads, we need to do a broadcast.
 	     */
 	    if (q->nwait > 0) {
 		int rc = pthread_cond_broadcast(&q->cond); assert(rc == 0);
@@ -385,9 +385,9 @@ nft_queue_dequeue(nft_queue * q, int timeout)
 	    q->first = -1;
 	    q->next  =  0;
 	}
-	/* If there could be threads blocked in nft_queue_add_wait(),
-	 * wake them now. Since the condition is shared between append
-	 * and pop threads, we need to do a broadcast.
+	/* If there could be threads blocked in nft_queue_enqueue,
+	 * wake them now. Since the condition is shared between _enqueue
+	 * and _dequeue threads, we need to do a broadcast.
 	 */
 	if (q->nwait && q->limit) {
 	    int rc = pthread_cond_broadcast(&q->cond); assert(rc == 0);
@@ -419,7 +419,7 @@ nft_queue_destroy(nft_core * p)
 	    q->destroyer(q->array[idx]);
 
     int rc = pthread_mutex_destroy(&q->mutex); assert(rc == 0);
-    rc     = pthread_cond_destroy (&q->cond);  assert(rc == 0);
+    rc     = pthread_cond_destroy (&q->cond);  //FIXME assert(rc == 0);
 
     // Free array only if it points to malloced memory.
     if (q->array != q->minarray) free(q->array);
@@ -761,7 +761,7 @@ poll_input(void *arg)
 
 /* Multiple worker threads are spawned that read messages
  * from the raw message queue, convert them to upper case,
- * and append them to the output queue.
+ * and add them to the output queue.
  */
 static void *
 worker_thread(void * index)
@@ -809,10 +809,10 @@ main()
      *
      * In this test, we create a work pipeline consisting of two queues.
      * The input thread reads lines of text from standard input,
-     * and appends these strings to the input queue.
+     * and adds these strings to the input queue.
      *
      * A number of worker threads pop strings from the input queue,
-     * convert them to upper case, and append them to the output queue.
+     * convert them to upper case, and add them to the output queue.
      * An output thread pops strings from the output queue and
      * prints them to standard output.
      *
@@ -883,10 +883,9 @@ t1( void)
     // With the queue empty, test the pop timeout.
     nft_queue_pop_wait(q, 1);
 
-    // Test the _append(), _count() and _peek() operations.
+    // Test the _add(), _count() and _peek() operations.
     int   i;
-    for ( i = 0 ; Strings[ i] != NULL ; i++)
-    {
+    for ( i = 0 ; Strings[ i] != NULL ; i++) {
 	rc = nft_queue_add( q, strdup( Strings[ i]));
 	assert(rc == 0);
 	assert(nft_queue_count(q) == (i + 1));
@@ -900,8 +899,7 @@ t1( void)
     assert(nft_queue_pop(q)    == NULL);
     assert(nft_queue_peek(q)   == NULL);
     assert(nft_queue_count(q)  == -1);
-
-    nft_queue_shutdown(q);
+    assert(nft_queue_shutdown(q) == EINVAL);
 
     fprintf(stderr, "passed.\n");
 }
@@ -912,14 +910,14 @@ t1( void)
 static void
 t2( void)
 {
-    fprintf(stderr, "t2 (append/pop): ");
+    fprintf(stderr, "t2 (add/pop): ");
     void      * ss;
     nft_queue_h q = nft_queue_create(0, free);
 
     // Test add/pop.
-    for (int i = 0 ; Strings[i] != NULL ; i++)
-	nft_queue_add( q, strdup(Strings[i]));
-
+    for (int i = 0 ; Strings[i] != NULL ; i++) {
+	int rc = nft_queue_add( q, strdup(Strings[i])); assert(rc == 0);
+    }
     for (int i = 0; ((ss = nft_queue_pop_wait(q, 0)) != NULL); i++) {
 	if (strcmp(ss, Strings[i])) {
 	    fprintf(stderr, " failed.\n");
@@ -929,9 +927,9 @@ t2( void)
     }
 
     // Test push/pop.
-    for (int i = 0 ; Strings[i] != NULL ; i++)
-	nft_queue_push( q, strdup(Strings[i]));
-
+    for (int i = 0 ; Strings[i] != NULL ; i++) {
+	int rc = nft_queue_push( q, strdup(Strings[i])); assert(rc == 0);
+    }
     for (int i = nft_queue_count(q); ((ss = nft_queue_pop_wait(q, 0)) != NULL); i--) {
 	if (strcmp(ss, Strings[i-1])) {
 	    fprintf(stderr, " failed.\n");
@@ -939,7 +937,7 @@ t2( void)
 	}
 	free(ss);
     }
-    nft_queue_shutdown( q);
+    int rc = nft_queue_shutdown(q); assert(rc == 0);
     fprintf(stderr, " passed.\n");
 }
 
@@ -949,7 +947,7 @@ t2( void)
 static void
 t3( void)
 {
-    fprintf(stderr, "t3 (append/destroy): ");
+    fprintf(stderr, "t3 (add/destroy): ");
 
     nft_queue_h q = nft_queue_create(0, free);
 
@@ -976,18 +974,18 @@ pop_thread(void * arg)
 }
 
 /*
- * t4 - Test queue shutdown during append.
+ * t4 - Test queue shutdown during add.
  */
 static void
 t4( void)
 {
-    fprintf(stderr, "t4 (append/shutdown): ");
+    fprintf(stderr, "t4 (add/shutdown): ");
 
     // Create a queue that is limited to one item.
     nft_queue_h q = nft_queue_create(1, NULL);
     nft_queue_add(q, "first");
 
-    // The queue limit is one, so this append should timeout immediately.
+    // The queue limit is one, so this add should timeout immediately.
     int rc = nft_queue_add_wait(q, "", 0);
     assert(ETIMEDOUT == rc);
 
@@ -1038,14 +1036,14 @@ t5( void)
 
 
 /*
- * t6 - Test cancellation during append.
+ * t6 - Test cancellation during add.
  */
 static void
 t6( void)
 {
 #ifndef WIN32	// no pthread_cancel() on WIN32
 
-    fprintf(stderr, "t6 (append/cancel): ");
+    fprintf(stderr, "t6 (add/cancel): ");
 
     nft_queue_h q = nft_queue_create(1, NULL);
     nft_queue_add(q, "first");

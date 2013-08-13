@@ -1077,24 +1077,34 @@ nft_task_pool_schedule(struct timespec abstime,
 
     // Save the handle - we cannot use task after calling nft_task_schedule_task.
     nft_task_pool_h handle = nft_task_pool_handle(task);
-    int             error  = nft_task_schedule_task((nft_task *)task); assert(!error);
-
-    return error ? NULL : handle;
+    int error = nft_task_schedule_task((nft_task *)task);  assert(!error);
+    if (error) {
+	nft_task_pool_discard(task);
+	handle = NULL;
+    }
+    return handle;
 }
 
-// Here is a task function that would block the nft_task scheduler thread.
-void sleeper(void * arg) {
-    long howlong = (long) arg;
-    printf("I will sleep for %ld seconds...\n", howlong);
-    sleep(howlong);
-    printf("I have slept for %ld seconds...\n", howlong);
+// sleeper
+// This is a thread function for testing. It clears the indicated flag,
+// after sleeping for a time corresponding to the flag's array index.
+// E.g., sleeper(3) sleeps for 3 seconds and then zeroes flags[3].
+// This task function would block the nft_task scheduler thread,
+// so the nft_task_pool is a good solution.
+//
+int flags[10] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+static void sleeper(void * arg) {
+    long flag = (long) arg;
+    fprintf(stderr,"\n\tsleeping for %ld seconds...", flag);
+    sleep(flag);
+    flags[flag] = 0;
 }
 
 void test_nft_task_pool()
 {
-    printf("testing nft_task_pool...");
+    fputs("testing nft_task_pool...",stderr);
 
-    // We shedule all of these tasks so that the delay plus sleep time
+    // We schedule all of these tasks so that the delay plus sleep time
     // sums to ten seconds. So a task should begin sleeping once each
     // second, and they should all finish after ten seconds.
     //
@@ -1108,8 +1118,10 @@ void test_nft_task_pool()
 	nft_task_pool_h ph = nft_task_pool_schedule(when, (struct timespec){0,0}, sleeper, (void*)howlong);
 	assert(ph != NULL);
     }
-    sleep(12);
-    printf("Passed!\n");
+    // After all the tasks should have finished, confirm that the flags have been cleared.
+    sleep(11);
+    for (int i = 1; i < 10; i++) assert(!flags[i]);
+    fputs("Passed!\n",stderr);
 }
 
 /****************************************************************************************/
@@ -1130,17 +1142,14 @@ test_heap()
 	// Treat i as a time in milliseconds.
 	task->abstime.tv_sec  = (i / 1000);
 	task->abstime.tv_nsec = (i % 1000) * 1000000;
-
 	heap_insert(&heap, task);
     }
     for (int i = 0; i < 10000; i++)
     {
 	nft_task * task;
 	heap_pop(&heap, &task);
-
 	assert(task->abstime.tv_sec  == (i / 1000));
 	assert(task->abstime.tv_nsec == (i % 1000) * 1000000);
-
 	free(task);
     }
     printf(" Passed!\n");
