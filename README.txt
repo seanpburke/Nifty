@@ -31,7 +31,8 @@ of the gettime() call in nft_gettime.h to suit your platform.
 
 This file gives a detailed discussion how you can create your own
 "classes" using Nifty, and why it may be advantageous to do so.
-See the section "Creating packages based on nft_core" below.
+See the section "Object-oriented" development based on nft_core,
+below.
 
 The Nifty packages can be built on WIN32. For more information,
 refer to the section "WIN32 Notes" below.
@@ -119,7 +120,7 @@ caller of nft_queue_shutdown will be the last thread.
 
 This discussion illustrates why Nifty API calls use handles.
 Reference counting of some kind, is virtually unavoidable when
-sharing pointers to dynamically-allacated (malloc'ed) memory
+sharing pointers to dynamically-allocated (malloc'ed) memory
 in a multithreaded program. The problem with reference counting
 is that it does not solve the problem, so much as it relocates
 the problem: instead of leaking memory, code leaks references,
@@ -128,7 +129,7 @@ with the identical result.
 The virtue of handles, is that clients of the API do not receive
 references - all of the reference counting logic happens inside 
 the API calls, where we can take pains to ensure correctness.
-Let's look at the implementation of the nft_queue_add call,
+Let's look at the implementation of the nft_queue_pop_wait call,
 to demonstrate how this works:
 
 void *
@@ -171,7 +172,7 @@ But, if you review the header file nft_queue.h, you will note that
 calls such as nft_queue_dequeue, and nft_queue_destroy, and indeed,
 the struct declaration of the nft_queue object itself, are exposed.
 You could be forgiven for assuming that the structure would be hidden,
-and the calls static, within nft_queue.c.. The reason that these APIs
+and the calls static, within nft_queue.c. The reason that these APIs
 are published, is to enable subclasses to be built from nft_queue.
 In fact, the nft_pool package is itself a subclass of nft_queue.
 In the section that follows, we discuss how this works in detail.
@@ -210,18 +211,22 @@ parent class, and grandparent class, etc.. Here is an example subclass:
 
 The other major feature of the Nifty framework, is that objects derived
 from nft_core have a "handle", which is an integer that uniquely identifies
-an object instance. We'll discuss how handles are used later, but for now,
-the important point is that, given a handle, you can use nft_core_lookup()
-to obtain a pointer to the object instance:
+an object instance. We have already discussed how client code refer to 
+objects via handles, when calling Nifty APIs. Within the API call, we use
+nft_core_lookup() to obtain a pointer to the object instance:
 
     nft_core * object_reference = nft_core_lookup( void * handle );
 
-A side effect of the lookup, is that the object's reference count is
-incremented. This ensures that the pointer you received from the lookup
-cannot be freed until you explicitly release your reference, via
-nft_core_discard:
+The object's reference count is incremented whenever nft_core_lookup is
+applied to a valid handle. This ensures that the pointer you received
+from the lookup cannot be freed until you explicitly release your
+reference,  via nft_core_discard:
 
     nft_core_discard( object_reference );
+
+This also means that you must balance every _lookup call with a call
+to _discard. It is particularly important that cancellation cleanup
+handlers discard references to nft_core objects where necessary.
 
 Since nft_core_lookup returns a nft_core*, you will need to type cast the
 nft_core* to the object's actual type. But, how can you be certain that
@@ -275,7 +280,7 @@ Note that it calls the parent-class ctor as the very first order of
 business, passing these same size and class parameters:
 
     subclass *
-    subclass_create(size_t size, const char * class, const char * substring) {
+    subclass_create(const char * class, size_t size, const char * substring) {
         subclass * self   = subclass_cast(nft_core_create(size, class));
         self.core.destroy = nft_subclass_destroy;
         self.substring    = strdup(substring);

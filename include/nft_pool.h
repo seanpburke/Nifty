@@ -55,9 +55,14 @@ typedef struct nft_pool_h * nft_pool_h;
  * silently increased to the minimum value.
  * 
  * Returns NULL on a malloc failure.
+ *
+ *  Note that nft_pool_create is actually a convenience macro.
+ *  The function nft_pool_create_f accepts class and size arguments,
+ *  to enable subclasses to be authored, based on nft_pool.
  */
-nft_pool_h nft_pool_create(int queue_limit, int max_threads, int stack_size);
-#define  NFT_POOL_MIN_STACK_SIZE 16*1024
+#define		nft_pool_create(queue_limit,max_threads,stack_size)     \
+nft_pool_handle(nft_pool_create_f(nft_pool_class, sizeof(nft_pool),     \
+                                  queue_limit, max_threads, stack_size));
 
 /* nft_pool_add:  Submit a work item to the pool.
  *
@@ -112,5 +117,42 @@ nft_pool_add_wait(nft_pool_h handle, int timeout, void (*function)(void *),  voi
  * that has been shutdown, from an invalid handle.
  */
 int nft_pool_shutdown(nft_pool_h pool, int timeout);
+
+/******************************************************************************
+ *
+ * The nft_pool package is completely functional, using only the APIs that
+ * are declared above this point. But, you may wish to implement a subclass
+ * based on nft_pool. The declarations that follow, are _only_ needed to 
+ * author subclasses, and they are generally not safe to use, unless you
+ * understand the risks.
+ *
+ ******************************************************************************
+ */
+#include <pthread.h>
+#include <nft_queue.h>
+
+typedef struct nft_pool		// Structure describing a thread pool.
+{
+    nft_queue           queue;		// Inherit from nft_queue.
+
+    int			num_threads;
+    int			max_threads;
+    int			idle_threads;
+    pthread_attr_t	attr;		// Create detached threads.
+} nft_pool;
+
+// Define nft_pool_class, showing derivation from nft_queue.
+#define nft_pool_class nft_queue_class ":nft_pool"
+
+// Define helper functions nft_pool_cast, _handle, _lookup, and _discard.
+NFT_DECLARE_CAST(nft_pool)
+NFT_DECLARE_HANDLE(nft_pool)
+NFT_DECLARE_LOOKUP(nft_pool)
+NFT_DECLARE_DISCARD(nft_pool)
+
+nft_pool *
+nft_pool_create_f(const char * class,
+		  size_t       size,
+		  int queue_limit, int max_threads, int stack_size);
 
 #endif // nft_pool_header

@@ -61,8 +61,8 @@ typedef struct nft_queue_h * nft_queue_h;
  *
  *  Returns	NULL on malloc failure.
  *
- *  Note that nft_queue create is actually a convenience macro.
- *  The function nft_create_f accepts class and size arguments,
+ *  Note that nft_queue_create is actually a convenience macro.
+ *  The function nft_queue_create_f accepts class and size arguments,
  *  to enable subclasses to be authored, based on nft_queue.
  *  The nft_pool package is an example of a nft_queue subclass.
  */
@@ -196,7 +196,7 @@ void (*nft_queue_set_destroyer(nft_queue_h h, void (*destroyer)(void *)))(void *
  *
  * The nft_queue package is completely functional, using only the APIs that
  * are declared above this point. But, you may wish to implement a subclass
- * based on nft_task. For example, the nft_pool package derives from nft_queue.
+ * based on nft_queue. For example, the nft_pool package derives from nft_queue.
  * The declarations that follow, are _only_ needed to author subclasses,
  * and they are generally not safe to use, unless you understand the risks.
  *

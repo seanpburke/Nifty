@@ -32,8 +32,10 @@
 #include <stdlib.h>
 
 #include <nft_gettime.h>
-#include <nft_queue.h>
 #include <nft_pool.h>
+
+// Define helper functions nft_pool_cast, _handle, _lookup, and _discard.
+NFT_DEFINE_HELPERS(nft_pool,)
 
 typedef struct work_item	// Work items are queued by the pool
 {
@@ -41,24 +43,12 @@ typedef struct work_item	// Work items are queued by the pool
     void  *argument;
 } work_item;
 
-typedef struct nft_pool		// Structure describing a thread pool.
-{
-    nft_queue           queue;		// Inherit from nft_queue.
-
-    int			num_threads;
-    int			max_threads;
-    int			idle_threads;
-    pthread_attr_t	attr;		// Create detached threads.
-} nft_pool;
-
-// Define nft_pool_class, showing derivation from nft_queue.
-#define nft_pool_class nft_queue_class ":nft_pool"
-
-// Define helper functions nft_pool_cast, _handle, _lookup, and _discard.
-NFT_DEFINE_HELPERS(nft_pool,static)
+// The nft_pool_create_f stack_size parameter is forced to this minimum.
+#define  NFT_POOL_MIN_STACK_SIZE 16*1024
 
 // When the pool has been shutdown, its handle is deleted.
 #define SHUTDOWN(pool) (nft_pool_handle(pool) == NULL)
+
 
 /*------------------------------------------------------------------------------
  * pool_thread_cleanup	- Function for use with pthread_cleanup_push/pop.
@@ -177,16 +167,15 @@ nft_pool_destroy(nft_core * p)
  * If stack_size is nonzero, and it is less than the default stack size,
  * then the default stack size will be used.
  *
- * Since this constructor does not accept class and size parameters,
- * it will not be practical to create a subclass of nft_pool.
- *
  * Returns NULL on malloc failure.
  *------------------------------------------------------------------------------
  */
-nft_pool_h
-nft_pool_create(int queue_limit, int max_threads, int stack_size)
+nft_pool *
+nft_pool_create_f(const char * class,
+		  size_t       size,
+		  int queue_limit, int max_threads, int stack_size)
 {
-    nft_queue * q = nft_queue_create_f(nft_pool_class, sizeof(nft_pool), queue_limit, free);
+    nft_queue * q = nft_queue_create_f(class, size, queue_limit, free);
     if (!q) return NULL;
 
     // Override the nft_core destructor with our own dtor.
@@ -203,7 +192,7 @@ nft_pool_create(int queue_limit, int max_threads, int stack_size)
     pool->num_threads  = 0;
     pool->idle_threads = 0;
 
-    return nft_pool_handle(pool);
+    return pool;
 }
 
 /*------------------------------------------------------------------------------
@@ -388,8 +377,8 @@ void test_shutdown(void * arg) { // A function that shutdowns down the pool.
     int rc = nft_pool_shutdown(arg, -1); assert(rc == 0);
 }
 
-int
-main(int argc, char *argv[])
+void
+basic_tests(void)
 {
     int rc;
 
@@ -502,6 +491,128 @@ main(int argc, char *argv[])
     rc = nft_pool_shutdown(pool, -1);
     assert(rc == 0);
     fputs("passed.\n", stderr);
+}
+
+
+/*****************************************************************************************
+ * nft_action_pool	- Demonstrate a subclass based on nft_pool
+ *
+ * The nft_pool requires to pass both a function and its argument,
+ * when adding a task to the pool. This is very flexible, but you
+ * might want to create a simpler pool, that applies the same action
+ * to every item that is passed to the pool.
+ *
+ * Here we demonstrate a subclass that extends nft_pool with a
+ * function attribute, named 'action'. You specify the action function
+ * when the pool is created, and this action is applied to every
+ * item that is added to the queue:
+ */
+typedef struct nft_action_pool {
+    nft_pool pool;
+    void  (* action)(void *);
+} nft_action_pool;
+
+// The class string must properly reflect inheritance from nft_pool_class.
+#define nft_action_pool_class nft_pool_class ":nft_action_pool"
+
+// This macro expands to declare the nft_action_pool_cast, _handle, _lookup, and _discard methods.
+NFT_DECLARE_HELPERS(nft_action_pool,static)
+
+// This macro expands to define the _cast, _handle, _lookup, and _discard methods.
+NFT_DEFINE_HELPERS(nft_action_pool,static)
+
+// Our constructor adds one parameter to initialize the new attribute.
+nft_action_pool_h
+nft_action_pool_create(int     queue_limit,
+		       int     max_threads,
+		       int     stack_size,
+		       void (* action)(void *))
+{
+    // Invoke the base class "private" constructor, passing our class string and size.
+    nft_pool * pool = nft_pool_create_f(nft_action_pool_class, sizeof(nft_action_pool), queue_limit, max_threads, stack_size);
+    if (!pool) return NULL;
+
+    nft_action_pool * pool_action = nft_action_pool_cast(pool);
+    pool_action->action = action;
+    return nft_action_pool_handle(pool_action);
+}
+
+// The _add operation has no function parameter:
+int
+nft_action_pool_add(nft_action_pool_h handle, void * argument)
+{
+    nft_action_pool * pool = nft_action_pool_lookup(handle);
+    if (!pool) return EINVAL;
+
+    // Here we pass pool->action and argument to the base class
+    // method nft_pool_add. Nifty APIs have static type-checking,
+    // so we have to typecast the handle:
+
+    int result = nft_pool_add((nft_pool_h) handle, pool->action, argument);
+
+    nft_action_pool_discard(pool);
+    return result;
+}
+int
+nft_action_pool_shutdown(nft_action_pool_h handle, int timeout)
+{
+    // We can pass our handle to parent-class methods,
+    // but we do have to type-cast the handle to avoid
+    // compilation warnings.
+    return nft_pool_shutdown((nft_pool_h) handle, timeout);
+}
+
+void
+test_nft_action_pool(void)
+{
+    int rc;
+    fputs("\nTesting nft_action_pool ", stderr);
+
+    // Create a nft_action_pool that applies clear_flag to each item.
+    // With this subclass, we set the pool's action function when we
+    // create it.
+    nft_action_pool_h action_pool =
+	nft_action_pool_create( 0, // queue_limit
+				0, // max_threads
+				0, // stack size
+				clear_flag );
+    assert(NULL != action_pool);
+
+    for (int i = 0; i < 10; i++) flags[i] = 1;
+    rc = nft_action_pool_add(action_pool, (void*) 1); assert(rc == 0);
+    rc = nft_action_pool_add(action_pool, (void*) 2); assert(rc == 0);
+    rc = nft_action_pool_add(action_pool, (void*) 3); assert(rc == 0);
+
+    // Note that we can use methods of the object's parent class,
+    // in object-oriented style, though we have to type-cast the handle:
+    //
+    rc = nft_pool_add((nft_pool_h) action_pool, sleeper, (void*) 0); assert(rc == 0);
+
+    // Wait for all threads to finish, and check the flags.
+    rc = nft_action_pool_shutdown(action_pool, -1);   assert(rc == 0);
+
+    for (int i = 0; i < 4; i++) assert(0 == flags[i]);
+
+    // Nifty won't let you do an invalid cast. Here we try to
+    // use a subclass method with an instance of the parent class.
+    // First, we create a nft_pool:
+    nft_pool_h pool = nft_pool_create( 0, 0, 0); assert(pool != NULL);
+
+    // Now we attempt to use the nft_pool in a call to nft_action_pool_add.
+    // We have to typecast the handle. Although the compiler is fooled
+    // by the typecast, Nifty's run-time type-checking is not fooled:
+    //
+    assert(EINVAL == nft_action_pool_add((nft_action_pool_h) pool, (void*) 1));
+
+    fputs("passed.\n", stderr);
+}
+
+int
+main(int argc, char *argv[])
+{
+    basic_tests();
+
+    test_nft_action_pool();
 
 #ifdef NDEBUG
     printf("You must recompile this test driver without NDEBUG!\n");
