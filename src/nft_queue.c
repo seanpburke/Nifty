@@ -66,8 +66,8 @@ NFT_DEFINE_HELPERS(nft_queue,);
 #define GROW(q)   (FULL(q) && (!q->limit || (q->size < q->limit)))
 #define SHRINK(q) ((COUNT(q) < (q->size/4)) && (NFT_QUEUE_MIN_SIZE <= (q->size/2)))
 
-// When the queue has been shutdown, its handle is deleted.
-#define SHUTDOWN(q) (nft_queue_handle(q) == NULL)
+// When the queue has been shutdown, the shutdown flag is true.
+#define SHUTDOWN(q) (0 != q->shutdown)
 
 /*----------------------------------------------------------------------
  * queue_validate - Validate the consistency of the queue.
@@ -233,6 +233,8 @@ queue_wait_cleanup(void * arg)
 static int
 queue_wait(nft_queue * q, int timeout)
 {
+    if (SHUTDOWN(q)) return ESHUTDOWN;
+
     // If the queue is empty, we'll wait for it to become non-EMPTY.
     // Otherwise, we assume it is full, and wait to become non-LIMIT.
     //
@@ -372,10 +374,11 @@ nft_queue_dequeue(nft_queue * q, int timeout)
 
     // If the queue is empty and timeout is set, wait for an enqueue.
     // Do not allow dequeues to block after the queue has shut down.
-    if (EMPTY(q) && !SHUTDOWN(q) && timeout) queue_wait(q, timeout);
+    if (EMPTY(q) && timeout) queue_wait(q, timeout);
 
+    // The queue may have been shutdown while we were waiting.
     // If the wait timed out, the list may still be empty.
-    if (!EMPTY(q)) {
+    if (!SHUTDOWN(q) && !EMPTY(q)) {
 	// Pop the first item in the queue.
 	item     = q->array[q->first];
 	q->first = NEXT(q->first);
@@ -471,6 +474,7 @@ nft_queue_create_f(const char * class,
     q->first = -1;
     q->next  = 0;
     q->nwait = 0;
+    q->shutdown = 0;
 
     int rc;
     if ((rc = pthread_mutex_init(&q->mutex, NULL)) ||
@@ -594,45 +598,41 @@ nft_queue_shutdown(nft_queue_h h)
     nft_queue * q = nft_queue_lookup(h);
     if (!q) return EINVAL;
 
-    int rc = pthread_mutex_lock(&q->mutex); assert(rc == 0);
+    int result = 0;
+    int rc     = pthread_mutex_lock(&q->mutex); assert(rc == 0);
 
-    // nft_core_destroy() will delete the object's handle, so that no
-    // new references to this queue can be obtained via nft_queue_lookup.
-    // If the reference count is nonzero, it will decrement it, and
-    // free the object if the reference count becomes zero as a result.
-    //
-    // But, there should be at least two references to the queue:
-    // the initial reference from nft_queue_create, and the reference
-    // that we just created via _lookup. So this will not actually
-    // destroy the queue (and it/ would be very bad if it did).
-    // The queue will be destroyed after we discard our reference,
-    // after waiting for all waiters to detach from the queue.
-    //
-    assert(q->core.reference_count >= 2);
-    if (q->core.handle) {
-	nft_core_destroy(&q->core);
-	assert(!q->core.handle);
-    }
-    else {
-	queue_shutdown_cleanup(q);
-	return ESHUTDOWN;
-    }
-
+    // This cleanup handler frees the queue mutex
+    // and discards the queue reference.
     pthread_cleanup_push(queue_shutdown_cleanup, q);
-    if (q->nwait > 0) {
-	// Waken any threads that are blocked in queue_wait().
-	rc = pthread_cond_broadcast(&q->cond); assert(rc == 0);
 
-	// Wait for all waiting threads to detach from the queue.
-	// queue_wait will signal us when the last waiter leaves.
-	//
-	while (q->nwait > 0) {
-	    rc = pthread_cond_wait(&q->cond, &q->mutex); assert(rc == 0);
+    // Don't let shutdown be called twice.
+    if (!SHUTDOWN(q))
+    {
+	q->shutdown = 1;
+
+	// This is an "extra" discard, to cancel the initial reference from
+	// when the queue was created, which enables the queue to be destroyed,
+	// when the last reference is discarded. Do this before waiting on the
+	// condition, in case we are cancelled while waiting.
+	nft_queue_discard(q);
+
+	if (q->nwait > 0) {
+	    // Waken any threads that are blocked in queue_wait().
+	    rc = pthread_cond_broadcast(&q->cond); assert(rc == 0);
+
+	    // Wait for all waiting threads to detach from the queue.
+	    // queue_wait will signal us when the last waiter leaves.
+	    //
+	    while (q->nwait > 0) {
+		rc = pthread_cond_wait(&q->cond, &q->mutex); assert(rc == 0);
+	    }
 	}
     }
-    pthread_cleanup_pop(1); // executes queue_cleanup
+    else result = ESHUTDOWN;
 
-    return 0;
+    pthread_cleanup_pop(1); // executes queue_shutdown_cleanup
+
+    return result;
 }
 
 /*----------------------------------------------------------------------

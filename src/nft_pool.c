@@ -46,8 +46,8 @@ typedef struct work_item	// Work items are queued by the pool
 // The nft_pool_create_f stack_size parameter is forced to this minimum.
 #define  NFT_POOL_MIN_STACK_SIZE 16*1024
 
-// When the pool has been shutdown, its handle is deleted.
-#define SHUTDOWN(pool) (nft_pool_handle(pool) == NULL)
+// When the queue has been shutdown, the shutdown flag is true.
+#define SHUTDOWN(q) (0 != pool->queue.shutdown)
 
 
 /*------------------------------------------------------------------------------
@@ -207,7 +207,7 @@ nft_pool_create_f(const char * class,
  *
  * Returns: 0		Success
  *          ENOMEM      malloc failed, memory exhausted.
- *	    EINVAL	Invalid handle, or pool has been shutdown.
+ *	    EINVAL	Invalid handle
  *          ESHUTDOWN   Pool has been shutdown.
  *          various     pthread_create error codes
  *
@@ -293,7 +293,7 @@ pool_shutdown_cleanup(void * arg)
  * nft_pool_shutdown	- Free resources associated with thread pool
  *
  *  Returns zero 	- On success.
- *  	    EINVAL	- Invalid pool, or pool has been shut down.
+ *  	    EINVAL	- Invalid pool
  *          ESHUTDOWN   - Pool has been shutdown.
  *------------------------------------------------------------------------------
  */
@@ -303,13 +303,11 @@ nft_pool_shutdown(nft_pool_h handle, int timeout)
     nft_pool * pool = nft_pool_lookup(handle);
     if (!pool) return EINVAL;
 
-    // nft_queue_shutdown will delete our handle, so that no new
-    // work items can be enqueued. If the queue is empty, it will
-    // wake any idle threads that are waiting, and wait for them
-    // to detach, but busy pool threads will continue to dequeue
-    // and process work items.
+    // nft_queue_shutdown will wake any idle threads that are waiting,
+    // either to enqueue or dequeue, and wait for them to detach,
+    // but busy pool threads will continue to dequeue and process items.
     //
-    int result  = nft_queue_shutdown(nft_queue_handle(&pool->queue));
+    int result  = nft_queue_shutdown((nft_queue_h) handle);
     if (result != 0) {
 	nft_pool_discard(pool);
 	return result;
@@ -391,6 +389,7 @@ basic_tests(void)
     rc = nft_pool_add(pool, clear_flag, (void*) 0); assert(rc == 0);
     rc = nft_pool_add(pool, clear_flag, (void*) 1); assert(rc == 0);
     rc = nft_pool_add(pool, clear_flag, (void*) 2); assert(rc == 0);
+    sleep(1);
     rc = nft_pool_shutdown(pool, 1); assert(rc == 0);
 
     // We asked shutdown to wait, but it should not time out.
@@ -409,6 +408,7 @@ basic_tests(void)
     rc = nft_pool_add(pool, sleeper, (void*) 1); assert(rc == 0);
     rc = nft_pool_add(pool, sleeper, (void*) 2); assert(rc == 0);
     rc = nft_pool_add(pool, sleeper, (void*) 3); assert(rc == 0);
+    sleep(1);
     rc = nft_pool_shutdown(pool, -1);            assert(rc == 0);
     assert(flags[1] == 0 && flags[2] == 0 && flags[3] == 0);
     fputs("passed.\n", stderr);

@@ -9,3 +9,4 @@ lib/libnifty.a
 
 # For XCode on MacOSX
 src/*.dSYM
+src/Nifty-*
