@@ -313,7 +313,7 @@ typedef struct nft_string
 #define nft_string_class nft_core_class ":nft_string"
 
 // This macro expands to the following declarations:
-NFT_DECLARE_HELPERS(nft_string,)
+NFT_DECLARE_WRAPPERS(nft_string,)
 // typedef struct nft_string_h * nft_string_h;
 // nft_string * nft_string_cast(nft_core * p);
 // nft_string_h nft_string_handle(const nft_string * s);
@@ -321,7 +321,7 @@ NFT_DECLARE_HELPERS(nft_string,)
 // void nft_string_discard(nft_string * s);
 
 // This macro expands to definitions for the prototypes:
-NFT_DEFINE_HELPERS(nft_string,)
+NFT_DEFINE_WRAPPERS(nft_string,)
 
 // The destructor should take a nft_core * parameter.
 void

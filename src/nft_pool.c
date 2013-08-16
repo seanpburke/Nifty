@@ -35,7 +35,7 @@
 #include <nft_pool.h>
 
 // Define helper functions nft_pool_cast, _handle, _lookup, and _discard.
-NFT_DEFINE_HELPERS(nft_pool,)
+NFT_DEFINE_WRAPPERS(nft_pool,)
 
 typedef struct work_item	// Work items are queued by the pool
 {
@@ -528,10 +528,10 @@ typedef struct nft_action_pool {
 #define nft_action_pool_class nft_pool_class ":nft_action_pool"
 
 // This macro expands to declare the nft_action_pool_cast, _handle, _lookup, and _discard methods.
-NFT_DECLARE_HELPERS(nft_action_pool,static)
+NFT_DECLARE_WRAPPERS(nft_action_pool,static)
 
 // This macro expands to define the _cast, _handle, _lookup, and _discard methods.
-NFT_DEFINE_HELPERS(nft_action_pool,static)
+NFT_DEFINE_WRAPPERS(nft_action_pool,static)
 
 // Our constructor adds one parameter to initialize the new attribute.
 nft_action_pool_h

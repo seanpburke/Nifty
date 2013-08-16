@@ -37,7 +37,7 @@
 #include <nft_gettime.h>
 #include <nft_queue.h>
 
-NFT_DEFINE_HELPERS(nft_queue,);
+NFT_DEFINE_WRAPPERS(nft_queue,);
 
 /* Here are some macros to help us manage the circular array.
  *
