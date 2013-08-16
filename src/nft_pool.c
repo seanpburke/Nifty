@@ -89,15 +89,14 @@ nft_pool_thread(void * arg)
     nft_pool * pool = nft_pool_cast(arg);
     int rc          = pthread_mutex_lock(&pool->queue.mutex); assert(rc == 0);
 
-    // Unless shutting down, wait for up to one second for work to arrive, then exit.
-    int timeout = SHUTDOWN(pool) ? 0 : 1 ;
-
     // Increment pool->idle_threads before we block in nft_queue_dequeue.
     // nft_pool_add has already incremented num_threads, after spawning this thread.
     pool->idle_threads++;
 
+    // nft_queue_dequeue will not block when the queue is shutting down.
+    // It will continue to dequeue items, and return ESHUTDOWN when the queue is empty.
     work_item * item;
-    while ((item = nft_queue_dequeue(&pool->queue, timeout)))
+    while ((0 == nft_queue_dequeue(&pool->queue, 1, (void**) &item)))
     {
 	pool->idle_threads--;
 
@@ -120,8 +119,6 @@ nft_pool_thread(void * arg)
 	pthread_cleanup_pop(0); // do not execute pool_thread_cleanup
 	rc = pthread_mutex_lock(&pool->queue.mutex); assert(0 == rc);
 
-	// If the pool is shutting down, exit once the queue is empty.
-	if (SHUTDOWN(pool)) timeout = 0;
 	pool->idle_threads++;
     }
     pool->idle_threads--;
@@ -175,7 +172,7 @@ nft_pool_create_f(const char * class,
 		  size_t       size,
 		  int queue_limit, int max_threads, int stack_size)
 {
-    nft_queue * q = nft_queue_create_f(class, size, queue_limit, free);
+    nft_queue * q = nft_queue_create_ex(class, size, queue_limit);
     if (!q) return NULL;
 
     // Override the nft_core destructor with our own dtor.
@@ -307,7 +304,7 @@ nft_pool_shutdown(nft_pool_h handle, int timeout)
     // either to enqueue or dequeue, and wait for them to detach,
     // but busy pool threads will continue to dequeue and process items.
     //
-    int result  = nft_queue_shutdown((nft_queue_h) handle);
+    int result  = nft_queue_shutdown((nft_queue_h) handle, timeout);
     if (result != 0) {
 	nft_pool_discard(pool);
 	return result;
@@ -457,7 +454,6 @@ basic_tests(void)
     rc = pthread_create(&thread, NULL, (void* (*)(void*)) test_shutdown, pool);
     assert(0 == rc);
     sleep(1);
-    assert(pref->queue.core.handle == NULL);
     assert(pref->num_threads  == 1);
     assert(pref->idle_threads == 0);
     assert(pref->queue.core.reference_count == 3);
