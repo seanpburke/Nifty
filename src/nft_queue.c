@@ -891,14 +891,20 @@ main()
     // The input queue should have been destroyed now.
     assert(EINVAL == nft_queue_state(input_Q));
 
-    // Shutdown the output queue without waiting.
-    rc = nft_queue_shutdown(output_Q, 0); assert(rc == 0);
+    // Shutdown the output queue without waiting. This could succeed
+    // or return ETIMEDOUT, depending on thread scheduling.
+    rc = nft_queue_shutdown(output_Q, 0); assert(rc == 0 || rc == ETIMEDOUT);
 
     // The output queue may be in the process of shutting down, or destroyed.
     rc = nft_queue_state(output_Q); assert(rc == ESHUTDOWN || rc == EINVAL);
 
+    // Wait for the output thread to finish emptying the output queue.
     rc = pthread_join(output_thread, &thread_return);  assert(rc == 0);
     assert((long)thread_return == ESHUTDOWN);
+
+    // Now shut it down again. If it failed the first time, this should succeed,
+    // but if it succeeded on the first try, this should return EINVAL.
+    rc = nft_queue_shutdown(output_Q, 0); assert(rc == 0 || rc == EINVAL);
 
     fprintf(stderr, "words in: %d	words out: %d\n", countin, countout);
     assert(countin == countout);
