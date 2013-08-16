@@ -216,56 +216,60 @@ The idea is that every object in the system will inherit from this core class:
 Inheritance is as simple as it can be - the parent class must be declared
 as the very first element of the subclass. This is single-inheritance,
 and in consequence, a pointer to any subclass is also a pointer to its 
-parent class, and grandparent class, etc.. Here is an example subclass:
+parent class, and grandparent class, etc. 
 
-    typedef struct subclass {
-	nft_core core;
-	char   * substring;
-    } subclass;
+To demonstate, here is an example subclass, consisting of a simple
+shared (reference-counted) string:
+
+typedef struct nft_string
+{
+    nft_core core;
+    char   * string;
+} nft_string;
 
 The other major feature of the Nifty framework, is that objects derived
 from nft_core have a "handle", which is an integer that uniquely identifies
-an object instance. We have already discussed how client code refer to 
+one object instance. We have already discussed how client code refer to 
 objects via handles, when calling Nifty APIs. Within the API call, we use
 nft_core_lookup() to obtain a pointer to the object instance:
 
     nft_core * object_reference = nft_core_lookup( void * handle );
 
 The object's reference count is incremented whenever nft_core_lookup is
-applied to a valid handle. This ensures that the pointer you received
+applied to a valid handle. This ensures that the pointer you receive
 from the lookup cannot be freed until you explicitly release your
 reference,  via nft_core_discard:
 
     nft_core_discard( object_reference );
 
 This also means that you must balance every _lookup call with a call
-to _discard. It is particularly important that cancellation cleanup
-handlers discard references to nft_core objects where necessary.
+to _discard, or the object will never by freed. It is particularly
+important that cancellation cleanup handlers discard references to
+nft_core objects where necessary.
 
-Since nft_core_lookup returns a nft_core*, you will need to type cast the
-nft_core* to the object's actual type. But, how can you be certain that
-this pointer really points to an instance of some class, or an object 
-derived from that class?
+Since nft_core_lookup returns a nft_core *, you will need to type-cast
+the nft_core * to the object's actual type. But, how can you be certain
+that this pointer really points to an instance of a given class?
 
-This is the purpose of the nft_core.class member. When a subclass is
+That is the purpose of the nft_core.class member. When a subclass is
 based on nftcore, we arrange that the nft_core.class will be the string
 "nft_core:subclass". Similarly, if we derive a sub-subclass from subclass,
 its class string should be "nft_core:subclass:subsubclass". In this way,
 we are able to define a safe typecast function for subclass, by comparing
-the object's class string to the desired class "nft_core:nft_subclass":
+the object's class name to the desired class. For our shared string class:
 
-    subclass *
-    subclass_cast(nft_core * p) {
-        if (!strncmp(p.class, "nft_core:subclass", strlen("nft_core:subclass")))
-             return (subclass*) p;
+    nft_string *
+    nft_string_cast(nft_core * object) {
+        if (!strncmp(object->class, "nft_core:nft_string", strlen("nft_core:nft_string")))
+             return (nft_string *) object;
         else
              return NULL;
     }
 
-The trick, then, is to arrange for the nft_core.class string to be constructed
+The trick, then, is to arrange for the nft_core.class name to be constructed
 properly when we instantiate subclasses. With these considerations in mind,
-it should be clear why the nft_core constructor (shown below) takes both class
-and size parameters - these indicate the subclass that is being instantiated,
+it should be clear why the nft_core constructor (shown below) takes both
+classand size parameters - these indicate the subclass that is being created,
 and its size:
 
     nft_core *
@@ -276,72 +280,75 @@ and its size:
     }
 
 Note that the constructor shown above is simplified, because it omits 
-the details of handle allocation. But it is sufficient to illustrate
-the core concepts.
-
+the details of handle allocation. But it is enough to illustrate the idea.
 The core destroyer is also quite simple - it merely frees the memory
-for the instance:
+that was occupied by the object, but we do pass the pointer thru
+nft_core_cast, to ensure that we are freeing a nft_core object:
 
     void
-    nft_core_destroy(nft_core * self) {
-        free(self);
+    nft_core_destroy(nft_core * pointer) {
+        nft_core * object = nft_core_cast(pointer, nft_core_class);
+	if (object) free(object);
     }
 
-Below, we show a construtor for a subclass that derives from nft_core.
-Note that it accepts the same size and class parameters that the core
-constructor does - this enables us to derive subclasses from this subclass.
-Note that it calls the parent-class ctor as the very first order of
-business, passing these same size and class parameters:
+Below, we show the constructor for our nft_string example.
+Note that it accepts the same size and class parameters that the
+core constructor does - this enables us to derive subclasses from
+this subclass. Note that it calls the parent-class ctor as the 
+very first step, passing these same size and class parameters:
 
-    subclass *
-    subclass_create(const char * class, size_t size, const char * substring) {
-        subclass * self   = subclass_cast(nft_core_create(size, class));
-        self.core.destroy = nft_subclass_destroy;
-        self.substring    = strdup(substring);
+    nft_string *
+    nft_string_create(const char * class, size_t size, const char * string)
+    {
+	nft_string  * object = nft_string_cast(nft_core_create(class, size));
+	object->core.destroy = nft_string_destroy;
+	object->string = strdup(string);
+	return object;
     }
 
-You may also have noted that the subclass ctor overrides the destructor.
+You may also have noted that the subclass constructor overrides the destructor.
 This is how virtual methods work in Nifty - it is up to you to manage them.
-The subclass destructor must call its parent dtor as the very last order of
-business:
+The subclass destructor must call its parent destructor as the very last step:
 
     void
-    subclass_destroy(subclass * self) {
-        free(self.substring);
-        nft_core_destroy(&self.core);
+    nft_string_destroy(nft_core * pointer)
+    {
+	nft_string * object = nft_string_cast(pointer);
+	if (object) free(object->string);
+	nft_core_destroy(p);
     }
 
-So, to create an instance of subclass, we simply invoke the constructor,
+So, to create an instance of nft_string, we simply invoke the constructor,
 passing that class string, size, and the 'substring' parameter:
 
-    subclass * this = subclass_create("nft_core:subclass", sizeof(subclass), "substring");
+    nft_string * this = nft_string_create("nft_core:nft_string", sizeof(nft_string), "substring");
 
-Let us now pause and consider, that this is the entire inheritance system
-in the Nifty framework, and we have not yet used a single macro. You knew
+Let us now pause and reflect, that this is the entire inheritance system
+in the Nifty framework. We have not yet used a single macro, but you knew
 that could not last, and besides, we can obtain real benefits from a few
-simple macros. First, we define the nft_core class string using this macro:
+simple macros. First, we define the nft_core class name using this macro:
 
     #define nft_core_class    "nft_core"
 
-This macro makes it easy to construct the class string for a subclass,
+This macro makes it easy to construct the class name of a subclass,
 taking advantage of the fact that C will implicitly concatenate two
-string literals that occur together:
+string literals that occur together. For example:
 
-    #define subclass_class nft_core_class ":subclass"
+    #define nft_string_class nft_core_class ":nft_string"
 
-This may seem trivial, but it pays off when we derive a sub-subclass
-from subclass:
+This may seem trivial, but it pays off when we derive a subclass
+from nft_string:
 
-    #define subsubclass_class subclass_class ":subsubclass"
+    #define nft_substring_class nft_string_class ":nft_substring"
 
-The benefit should now be apparent: if subclass changes its place in the
+The benefit should now be apparent: if nft_string changes its place in the
 class hierarchy, these changes will propogate automatically to the value
-of subsubclass_class.
+of nft_substring_class.
 
-Given the subclass_class macro, the subclass_cast() function that we showed
-earlier can now be created via macros. The NFT_DECLARE_CAST macro below,
+Given the nft_string_class macro, the nft_string_cast() function that we
+ showed earlier can now be created via macros. The NFT_DECLARE_CAST macro
 creates the function prototype in a header file, and the NFT_DEFINE_CAST
-macro creates the fuction definition in a .c file:
+macro creates the function definition in a .c file:
 
     #define NFT_DECLARE_CAST(subclass) \
     subclass * subclass##_cast(nft_core * p);
@@ -360,9 +367,9 @@ easier to do reference counting, but we'll focus on that aspect of Nifty
 later on, under REFERENCE COUNTING. For now, we just want to discuss how
 nft_core lets you manipulate handles of subclasses.  
 
-Here, we create an instance of subclass, and save its handle in variable h:
+Here, we create an instance of nft_string, and save its handle in variable h:
 
-    subclass * o = subclass_create(subclass_class, sizeof(subclass), "my substring");
+    nft_string * o = nft_string_create(nft_string_class, sizeof(nft_string), "my substring");
     nft_handle h = o->core.handle;
 
 The handle can be used to obtain a copy of the original object pointer.
@@ -378,51 +385,51 @@ succeed, so your code should always look like this:
     }
 
 The difficulty is that the pointer returned by nft_core_lookup is really an
-instance of subclass. To be type safe, We must use subclass_cast to safely
+instance of nft_string. To be type safe, We must use nft_string_cast to safely
 typecast the nft_core*, and we need to pass &s->core to nft_core_discard:
 
-    subclass * s = subclass_cast(nft_core_lookup(h));
+    nft_string * s = nft_string_cast(nft_core_lookup(h));
     if (s) {
         ...
         nft_core_discard(&s->core);
     }
 
 We can use macros to create type-safe wrappers that clean up the code above.
-First, let's give handles of subclass objects their own type, subclass_h:
+First, let's give handles of nft_string objects their own type, nft_string_h:
 
-    typedef struct subclass_h * subclass_h;
+    typedef struct nft_string_h * nft_string_h;
 
-Now, define a simple wrapper function to cast a subclass object's handle
-to type subclass_h:
+Now, define a simple wrapper function to cast a nft_string object's handle
+to type nft_string_h:
 
-    subclass_h subclass_handle(const subclass * s) { 
-        return (subclass_h) s->core.handle;
+    nft_string_h nft_string_handle(const nft_string * s) { 
+        return (nft_string_h) s->core.handle;
     }
 
 Next, a wrapper for nft_core_lookup in the same style:
 
-    subclass * subclass_lookup(subclass_h h) {
-        return subclass_cast(nft_core_lookup(h));
+    nft_string * nft_string_lookup(nft_string_h h) {
+        return nft_string_cast(nft_core_lookup(h));
     }
 
 And, a wrapper for nft_core_discard:
 
-    void subclass_discard(subclass * s) {
+    void nft_string_discard(nft_string * s) {
         nft_core_discard(&s->core);
     }
 
 These wrapper functions provide clean, strongly-typed APIs to manipulate
-subclass handles and references:
+nft_string handles and references:
 
-    subclass * o = subclass_create(subclass_class, sizeof(subclass), "my substring");
-    subclass_h h = subclass_handle(o);
+    nft_string * o = nft_string_create(nft_string_class, sizeof(nft_string), "my substring");
+    nft_string_h h = nft_string_handle(o);
 
-    subclass * s = subclass_lookup(h);
-    subclass_discard(s);
+    nft_string * s = nft_string_lookup(h);
+    nft_string_discard(s);
 
-These wrapper functions can easily be defined via macros. Note that the
-functions each have a macro to declare the prototype, and another to 
-define the function:
+These wrapper functions can easily be defined via macros. Note that 
+these functions each have a macro to declare the prototype, and another
+to define the function:
 
 #define NFT_TYPEDEF_HANDLE(subclass) \
 typedef struct subclass##_h * subclass##_h;
@@ -447,56 +454,54 @@ void subclass##_discard(subclass * s) { nft_core_discard(&s->core); }
 
 Finally, we gather all these macros into two convenience macros:
 
-#define NFT_DECLARE_HELPERS(subclass) \
+#define NFT_DECLARE_WRAPPERS(subclass) \
 NFT_DECLARE_CAST(subclass)   \
 NFT_TYPEDEF_HANDLE(subclass) \
 NFT_DECLARE_HANDLE(subclass) \
 NFT_DECLARE_LOOKUP(subclass) \
 NFT_DECLARE_DISCARD(subclass)
 
-#define NFT_DEFINE_HELPERS(subclass) \
+#define NFT_DEFINE_WRAPPERS(subclass) \
 NFT_DEFINE_CAST(subclass)   \
 NFT_DEFINE_HANDLE(subclass) \
 NFT_DEFINE_LOOKUP(subclass) \
 NFT_DEFINE_DISCARD(subclass)
 
-These macros are all defined in nft_core.h. Using them, the entire implementation 
-of our subclass consists of the following:
+These macros are all defined in nft_core.h. Using them, the entire 
+implementation of our nft_string class consists of the following:
 
-typedef struct subclass
+typedef struct nft_string
 {
     nft_core core;
-    char   * substring;
-} subclass;
+    char   * string;
+} nft_string;
 
-#define subclass_class nft_core_class ":subclass"
+#define nft_string_class nft_core_class ":nft_string"
 
-NFT_DECLARE_HELPERS(subclass)
-NFT_DEFINE_HELPERS(subclass)
+NFT_DECLARE_WRAPPERS(subclass)
+NFT_DEFINE_WRAPPERS(subclass)
 
-void
-subclass_destroy(nft_core * p)
+nft_string_destroy(nft_core * p)
 {
-    subclass * this = subclass_cast(p);
-    free(this->substring);
+    nft_string * object = nft_string_cast(p);
+    if (object) free(object->string);
     nft_core_destroy(p);
 }
 
-subclass *
-subclass_create(const char * class, size_t size, const char * substring)
+nft_string *
+nft_string_create(const char * class, size_t size, const char * string)
 {
-    subclass    * this = subclass_cast(nft_core_create(class, size));
-    this->core.destroy = subclass_destroy;
-    this->substring    = strdup(substring);
-    return this;
+    nft_string  * object = nft_string_cast(nft_core_create(class, size));
+    object->core.destroy = nft_string_destroy;
+    object->string = strdup(string);
+    return object;
 }
 
 We demonstrate how to implement and use this example subclass in nft_core.c,
 in the unit test that begins with #ifdef MAIN. To build and run the demo, 
 simply do:
 
-   make nft_core
-   ./nft_core
+   make nft_core ; ./nft_core
 
 
 

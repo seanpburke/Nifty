@@ -59,7 +59,7 @@ subclass * subclass##_lookup(subclass##_h);
 int subclass##_discard(subclass *);
 
 // Note that static is a parameter, which can be empty.
-#define NFT_DECLARE_HELPERS(subclass, static) \
+#define NFT_DECLARE_WRAPPERS(subclass, static) \
 NFT_TYPEDEF_HANDLE(subclass) \
 static NFT_DECLARE_CAST(subclass)   \
 static NFT_DECLARE_HANDLE(subclass) \
@@ -77,7 +77,7 @@ subclass * subclass##_lookup(subclass##_h hl) { return subclass##_cast(nft_core_
 int subclass##_discard(subclass * sc) { return nft_core_discard((nft_core*) sc); }
 
 // Note that static is a parameter, which can be empty.
-#define NFT_DEFINE_HELPERS(subclass, static) \
+#define NFT_DEFINE_WRAPPERS(subclass, static) \
 static NFT_DEFINE_CAST(subclass)   \
 static NFT_DEFINE_HANDLE(subclass) \
 static NFT_DEFINE_LOOKUP(subclass) \
