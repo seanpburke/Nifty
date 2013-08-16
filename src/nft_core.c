@@ -172,7 +172,7 @@ nft_handle_lookup(nft_handle handle)
 }
 
 // Look up the handle and decrement the object reference count.
-// Deleting the handle if the new reference count is zero,
+// Deletes the handle if the new reference count is zero,
 // returning the new reference count.
 static int
 nft_handle_discard(nft_handle handle)
@@ -300,74 +300,79 @@ nft_core_destroy(nft_core * p)
 #include <stdio.h>
 
 // Here we demonstrate how to create a subclass derived from nft_core.
-// We are naming our subclass "subclass" - hope that's not too confusing.
-// The subclass adds a single attribute to the core class, named "substring".
+// This subclass provides a simple reference-counted string class.
 //
-typedef struct subclass
+typedef struct nft_string
 {
     nft_core core;
-    char   * substring;
-} subclass;
+    char   * string;
+} nft_string;
 
-// You must define a macro for the subclass's class string,
+// You must define a macro for the subclass's class name,
 // and pass it to the constructor to set the instance's .class.
-#define subclass_class nft_core_class ":subclass"
+#define nft_string_class nft_core_class ":nft_string"
 
 // This macro expands to the following declarations:
-NFT_DECLARE_HELPERS(subclass,)
-// typedef struct subclass_h * subclass_h;
-// subclass * subclass_cast(nft_core * p);
-// subclass_h subclass_handle(const subclass * s);
-// subclass * subclass_lookup(subclass_h h);
-// void subclass_discard(subclass * s);
+NFT_DECLARE_HELPERS(nft_string,)
+// typedef struct nft_string_h * nft_string_h;
+// nft_string * nft_string_cast(nft_core * p);
+// nft_string_h nft_string_handle(const nft_string * s);
+// nft_string * nft_string_lookup(nft_string_h h);
+// void nft_string_discard(nft_string * s);
 
 // This macro expands to definitions for the prototypes:
-NFT_DEFINE_HELPERS(subclass,)
+NFT_DEFINE_HELPERS(nft_string,)
 
-// To complete our subclass, we define the destructor and constructor:
+// The destructor should take a nft_core * parameter.
 void
-subclass_destroy(nft_core * p)
+nft_string_destroy(nft_core * p)
 {
-    subclass * this = subclass_cast(p);
-    free(this->substring);
+    nft_string * object = nft_string_cast(p);
+
+    // The _cast function will return NULL if p is not a nft_string *.
+    if (object) free(object->string);
+
+    // Remember to invoke the base-class destroyer last of all.
     nft_core_destroy(p);
 }
 
-subclass *
-subclass_create(const char * class, size_t size, const char * substring)
+// The constructor should accept class and size parameters,
+// so that further subclasses can be derived from this subclass.
+nft_string *
+nft_string_create(const char * class, size_t size, const char * string)
 {
-    subclass    * this = subclass_cast(nft_core_create(class, size));
-    this->core.destroy = subclass_destroy;
-    this->substring    = strdup(substring);
-    return this;
+    nft_string  * object = nft_string_cast(nft_core_create(class, size));
+    object->core.destroy = nft_string_destroy;
+    object->string = strdup(string);
+    return object;
 }
 
 // The definitions above create a complete subclass of nft_core.
 // This function demonstrates use of the constructor and helper functions.
 //
 static void
-subclass_tests()
+nft_string_tests()
 {
     // Create the original instance, and save its handle in the variable h.
-    subclass * o = subclass_create(subclass_class, sizeof(subclass), "my substring");
-    subclass_h h = subclass_handle(o);
+    nft_string * o = nft_string_create(nft_string_class, sizeof(nft_string), "my string");
+    nft_string_h h = nft_string_handle(o);
 
     // Look up the handle to obtain a second reference to the original instance.
-    subclass * r = subclass_lookup(h);
+    nft_string * r = nft_string_lookup(h);
 
     // The lookup operation incremented the reference count,
     // so we can safely use r to refer to the original object.
-    assert(!strcmp(r->substring, "my substring"));
+    assert(!strcmp(r->string, "my string"));
 
     // Discard the reference we obtained via lookup.
-    subclass_discard(r);
+    nft_string_discard(r);
 
     // Now discard the original reference. This will decrement its reference
     // count to zero, causing the object to be destroyed.
-    subclass_discard(o);
+    nft_string_discard(o);
 
     // The handle has been cleared, so lookup will now fail.
-    r = subclass_lookup(h);
+    r = nft_string_lookup(h);
     assert(r == NULL);
 }
 
@@ -413,7 +418,7 @@ main(int argc, char *argv[])
     basic_tests();
 
     // Now, test use nft_core as a base class.
-    subclass_tests();
+    nft_string_tests();
 
 #ifdef NDEBUG
     printf("This unit test is not effective when compiled with NDEBUG!\n");

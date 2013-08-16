@@ -151,14 +151,14 @@ nft_pool_destroy(nft_core * p)
 }
 
 /*------------------------------------------------------------------------------
- * nft_pool_create
+ * nft_pool_create_ex
  *
  * The queue_limit parameter sets the nft_queue limit parameter. If queue_limit
  * is negative, the pool's queue will be limited to the minimum size defined
  * in nft_queue.h. If queue_limit is zero, there will be no limit upon the size
  * of the queue. Otherwise, nft_queue_add will block if the limit is reached.
  *
- * The max_threads parameter will be forced to one if non-positive.
+ * The max_threads parameter will be forced to four if non-positive.
  *
  * If the stack_size is zero, it will be set to the default stack size.
  * If stack_size is nonzero, and it is less than the default stack size,
@@ -168,9 +168,8 @@ nft_pool_destroy(nft_core * p)
  *------------------------------------------------------------------------------
  */
 nft_pool *
-nft_pool_create_f(const char * class,
-		  size_t       size,
-		  int queue_limit, int max_threads, int stack_size)
+nft_pool_create_ex(const char * class, size_t size,
+		   int    queue_limit, int max_threads, int stack_size)
 {
     nft_queue * q = nft_queue_create_ex(class, size, queue_limit);
     if (!q) return NULL;
@@ -185,12 +184,27 @@ nft_pool_create_f(const char * class,
     if (stack_size  > 0) {
 	rc = pthread_attr_setstacksize(&pool->attr, stack_size); assert(0 == rc);
     }
-    pool->max_threads  = (max_threads >= 1) ? max_threads : 1;
+    pool->max_threads  = (max_threads > 0) ? max_threads : 4 ;
     pool->num_threads  = 0;
     pool->idle_threads = 0;
 
     return pool;
 }
+
+/*----------------------------------------------------------------------
+ * nft_pool_create()
+ *
+ * Like nft_pool_create_ex, with simpler parameters,
+ * and returning a nft_pool_h handle instead of nft_pool *.
+ *----------------------------------------------------------------------
+ */
+nft_pool_h
+nft_pool_create(int queue_limit, int max_threads, int stack_size)
+{
+    return nft_pool_handle(nft_pool_create_ex(nft_pool_class, sizeof(nft_pool),
+					      queue_limit, max_threads, stack_size));
+}
+
 
 /*------------------------------------------------------------------------------
  * nft_pool_add_wait	- Add a work item to the pool's queue.
@@ -290,7 +304,8 @@ pool_shutdown_cleanup(void * arg)
  * nft_pool_shutdown	- Free resources associated with thread pool
  *
  *  Returns zero 	- On success.
- *  	    EINVAL	- Invalid pool
+ *  	    EINVAL	- Invalid pool.
+ *          ETIMEDOUT   - Timed out while waiting.
  *          ESHUTDOWN   - Pool has been shutdown.
  *------------------------------------------------------------------------------
  */
@@ -352,7 +367,7 @@ nft_pool_shutdown(nft_pool_h handle, int timeout)
 #define sleep(n) _sleep(n*1000)
 #endif
 
-int flags[10] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+volatile int flags[10] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
 
 // Clear the indicated flag immediately.
 void clear_flag(void * arg) {
@@ -376,36 +391,35 @@ void
 basic_tests(void)
 {
     int rc;
-
     fputs("Test 1: basic test", stderr);
-    nft_pool_h pool = nft_pool_create( 32,  // queue_limit
-				       10,  // max_threads
-				 128*1024); // stack size
+
+    // Test shutdown on idle queue
+    nft_pool_h pool = nft_pool_create(-1,  // queue_limit is NFT_QUEUE_MIN_SIZE
+				       1,  // max_threads
+				       0); // default stack size
     assert(NULL != pool);
     flags[0] = 1, flags[1] = 1, flags[2] = 1;
     rc = nft_pool_add(pool, clear_flag, (void*) 0); assert(rc == 0);
     rc = nft_pool_add(pool, clear_flag, (void*) 1); assert(rc == 0);
     rc = nft_pool_add(pool, clear_flag, (void*) 2); assert(rc == 0);
-    sleep(1);
-    rc = nft_pool_shutdown(pool, 1); assert(rc == 0);
 
-    // We asked shutdown to wait, but it should not time out.
-    assert(rc != ETIMEDOUT || !"shutdown timed out");
-    assert(rc == 0);
-    assert(nft_pool_lookup(pool) == NULL);
+    // After a short sleep, pool should be idle, and shutdown with no timeout succeeds.
+    sleep(1);
+    assert(0 == nft_pool_shutdown(pool, 0));
     assert(flags[0] == 0 && flags[1] == 0 && flags[2] == 0);
     fputs("passed.\n", stderr);
 
-    // Test that shutdown blocks until work is finished.
     fputs("Test 2: shutdown while busy ", stderr);
+
+    // Test that shutdown blocks until work is finished.
+    // Create a pool with sufficient threads that three can be blocked at once.
     pool = nft_pool_create(-1,  // queue_limit is NFT_QUEUE_MIN_SIZE
-			    2,  // max_threads
+			    3,  // max_threads
 			    0); // default stack size
     flags[0] = 1, flags[1] = 1, flags[2] = 1;
     rc = nft_pool_add(pool, sleeper, (void*) 1); assert(rc == 0);
     rc = nft_pool_add(pool, sleeper, (void*) 2); assert(rc == 0);
     rc = nft_pool_add(pool, sleeper, (void*) 3); assert(rc == 0);
-    sleep(1);
     rc = nft_pool_shutdown(pool, -1);            assert(rc == 0);
     assert(flags[1] == 0 && flags[2] == 0 && flags[3] == 0);
     fputs("passed.\n", stderr);
@@ -417,7 +431,7 @@ basic_tests(void)
     // The test_exit function will call pthread_exit from the pool thread.
     fputs("Test 3: Call pthread_exit from pool thread ", stderr);
     pool = nft_pool_create(-1, 0, 0); assert(pool != NULL);
-    rc = nft_pool_add(pool, test_exit, 0);
+    rc   = nft_pool_add(pool, test_exit, 0);
     assert(0 == rc);
     sleep(1);
     // Verify that the pool is still functional afterward.
@@ -458,9 +472,11 @@ basic_tests(void)
     assert(pref->idle_threads == 0);
     assert(pref->queue.core.reference_count == 3);
 
+    // Take advantage of the base-class APIs.
+    assert(ESHUTDOWN == nft_queue_state((nft_queue_h) pool));
+
     // Cancel the test_shutdown thread, confirm the sleeper is still there.
-    rc = pthread_cancel(thread);
-    assert(0 == rc);
+    assert(pthread_cancel(thread) == 0);
     sleep(1);
     assert(pref->num_threads  == 1);
     assert(pref->idle_threads == 0);
@@ -525,7 +541,7 @@ nft_action_pool_create(int     queue_limit,
 		       void (* action)(void *))
 {
     // Invoke the base class "private" constructor, passing our class string and size.
-    nft_pool * pool = nft_pool_create_f(nft_action_pool_class, sizeof(nft_action_pool), queue_limit, max_threads, stack_size);
+    nft_pool * pool = nft_pool_create_ex(nft_action_pool_class, sizeof(nft_action_pool), queue_limit, max_threads, stack_size);
     if (!pool) return NULL;
 
     nft_action_pool * pool_action = nft_action_pool_cast(pool);
@@ -543,7 +559,6 @@ nft_action_pool_add(nft_action_pool_h handle, void * argument)
     // Here we pass pool->action and argument to the base class
     // method nft_pool_add. Nifty APIs have static type-checking,
     // so we have to typecast the handle:
-
     int result = nft_pool_add((nft_pool_h) handle, pool->action, argument);
 
     nft_action_pool_discard(pool);
@@ -568,21 +583,21 @@ test_nft_action_pool(void)
     // With this subclass, we set the pool's action function when we
     // create it.
     nft_action_pool_h action_pool =
-	nft_action_pool_create( 0, // queue_limit
-				0, // max_threads
-				0, // stack size
+	nft_action_pool_create(-1, // default queue_limit
+				0, // default max_threads
+				0, // default stack size
 				clear_flag );
     assert(NULL != action_pool);
 
     for (int i = 0; i < 10; i++) flags[i] = 1;
-    rc = nft_action_pool_add(action_pool, (void*) 1); assert(rc == 0);
+    rc = nft_action_pool_add(action_pool, (void*) 0); assert(rc == 0);
     rc = nft_action_pool_add(action_pool, (void*) 2); assert(rc == 0);
     rc = nft_action_pool_add(action_pool, (void*) 3); assert(rc == 0);
 
     // Note that we can use methods of the object's parent class,
     // in object-oriented style, though we have to type-cast the handle:
     //
-    rc = nft_pool_add((nft_pool_h) action_pool, sleeper, (void*) 0); assert(rc == 0);
+    rc = nft_pool_add((nft_pool_h) action_pool, sleeper, (void*) 1); assert(rc == 0);
 
     // Wait for all threads to finish, and check the flags.
     rc = nft_action_pool_shutdown(action_pool, -1);   assert(rc == 0);
@@ -611,7 +626,7 @@ main(int argc, char *argv[])
     test_nft_action_pool();
 
 #ifdef NDEBUG
-    printf("You must recompile this test driver without NDEBUG!\n");
+    printf("You must recompile this test program without NDEBUG!\n");
 #else
     printf("All tests passed.\n");
 #endif

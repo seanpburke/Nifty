@@ -26,8 +26,8 @@
  *
  ******************************************************************************
  */
-#ifndef nft_core_header
-#define nft_core_header
+#ifndef _nft_core_header
+#define _nft_core_header
 
 #define nft_core_class "nft_core"
 
@@ -83,4 +83,4 @@ static NFT_DEFINE_HANDLE(subclass) \
 static NFT_DEFINE_LOOKUP(subclass) \
 static NFT_DEFINE_DISCARD(subclass)
 
-#endif // nft_core_header
+#endif // _nft_core_header

@@ -32,8 +32,8 @@
  *
  *****************************************************************************
  */
-#ifndef nft_gettime_header
-#define nft_gettime_header
+#ifndef _nft_gettime_header
+#define _nft_gettime_header
 
 #include <time.h>
 
@@ -91,4 +91,4 @@ nft_gettime(void)
 #endif
 }
 
-#endif // nft_gettime_header
+#endif // _nft_gettime_header
