@@ -359,6 +359,10 @@ nft_pool_shutdown(nft_pool_h handle, int timeout)
 /******************************************************************************/
 /******************************************************************************/
 #ifdef MAIN
+#ifdef NDEBUG
+#undef NDEBUG  // Enable asserts for test code.
+#endif
+#include <assert.h>
 #include <stdio.h>
 #ifndef WIN32
 #include <unistd.h>
@@ -625,11 +629,7 @@ main(int argc, char *argv[])
 
     test_nft_action_pool();
 
-#ifdef NDEBUG
-    printf("You must recompile this test program without NDEBUG!\n");
-#else
     printf("All tests passed.\n");
-#endif
     exit(0);
 }
 #endif // MAIN

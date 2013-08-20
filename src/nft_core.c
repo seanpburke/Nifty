@@ -125,6 +125,8 @@ nft_handle_alloc(nft_core * object)
     // Ensure that the handle table and mutex are initialized.
     int rc = pthread_once(&HandleOnce, handle_init); assert(rc == 0);
 
+    if (!HandleMap) return NULL;
+
     rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
 
 rescan: // Scan for the next open slot in the HandleMap
@@ -295,12 +297,16 @@ nft_core_destroy(nft_core * p)
 /*******								*******/
 /******************************************************************************/
 /******************************************************************************/
-
 #ifdef MAIN
+#ifdef NDEBUG
+#undef NDEBUG  // Enable asserts for test code.
+#endif
+#include <assert.h>
 #include <stdio.h>
 
 // Here we demonstrate how to create a subclass derived from nft_core.
 // This subclass provides a simple reference-counted string class.
+// The README.txt file provides a detailed explanation of this.
 //
 typedef struct nft_string
 {
@@ -347,6 +353,19 @@ nft_string_create(const char * class, size_t size, const char * string)
     return object;
 }
 
+// This function demonstrates the use of nft_string_lookup/_discard,
+// to implement your class's accessor/mutator APIs.
+void
+nft_string_change(nft_string_h handle, const char * newstring)
+{
+    nft_string * object = nft_string_lookup(handle);
+    if (object) {
+	free(object->string);
+	object->string = strdup(newstring);
+	nft_string_discard(object);
+    }
+}
+
 // The definitions above create a complete subclass of nft_core.
 // This function demonstrates use of the constructor and helper functions.
 //
@@ -364,6 +383,10 @@ nft_string_tests()
     // so we can safely use r to refer to the original object.
     assert(!strcmp(r->string, "my string"));
 
+    // Test our mutator for nft_string.string:
+    nft_string_change(h, "changed string");
+    assert(!strcmp(r->string, "changed string"));
+
     // Discard the reference we obtained via lookup.
     nft_string_discard(r);
 
@@ -371,9 +394,12 @@ nft_string_tests()
     // count to zero, causing the object to be destroyed.
     nft_string_discard(o);
 
-    // The handle has been cleared, so lookup will now fail.
+    // The handle has been deleted, so lookup will now fail.
     r = nft_string_lookup(h);
     assert(r == NULL);
+
+    // We can safely call nft_string_change because it ignores stale handles.
+    nft_string_change(h, "third try");
 }
 
 
@@ -420,11 +446,7 @@ main(int argc, char *argv[])
     // Now, test use nft_core as a base class.
     nft_string_tests();
 
-#ifdef NDEBUG
-    printf("This unit test is not effective when compiled with NDEBUG!\n");
-#else
     printf("All tests passed.\n");
-#endif
     exit(0);
 }
 

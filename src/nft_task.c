@@ -713,9 +713,11 @@ heap_delete(heap_t *heap, unsigned int index)
 /*******								*******/
 /******************************************************************************/
 /******************************************************************************/
-
 #ifdef MAIN
-
+#ifdef NDEBUG
+#undef NDEBUG  // Assertions must be active in test code.
+#endif
+#include <assert.h>
 #include <stdio.h>
 #ifndef WIN32
 #include <unistd.h>
@@ -1172,11 +1174,7 @@ main(int argc, char *argv[])
     // Test the subclass implementation
     test_nft_task_pool();
 
-#ifdef NDEBUG
-    printf("You must recompile this test driver without NDEBUG!\n");
-#else
     printf("All tests passed.\n");
-#endif
     exit(0);
 }
 

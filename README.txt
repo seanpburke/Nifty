@@ -346,7 +346,7 @@ class hierarchy, these changes will propogate automatically to the value
 of nft_substring_class.
 
 Given the nft_string_class macro, the nft_string_cast() function that we
- showed earlier can now be created via macros. The NFT_DECLARE_CAST macro
+showed earlier can now be created via macros. The NFT_DECLARE_CAST macro
 creates the function prototype in a header file, and the NFT_DEFINE_CAST
 macro creates the function definition in a .c file:
 
@@ -359,43 +359,44 @@ macro creates the function definition in a .c file:
         return (subclass *) nft_core_cast(p, subclass##_class); \
     }
 
-*** OBJECT HANDLES ***
 
-Every object derived from nft_core has a handle that can be used to look up
-the original object. We want objects to have handles, because that makes it
-easier to do reference counting, but we'll focus on that aspect of Nifty
-later on, under REFERENCE COUNTING. For now, we just want to discuss how
-nft_core lets you manipulate handles of subclasses.  
+We have already discussed, that every object derived from nft_core has a
+handle that can be used to look up the original object, and we have shown
+how this makes it possible to keep all reference-counting logic inside
+the public API. Now we'll talk about how to manipulate handles within
+these public APIs. Below, we create an instance of nft_string, and save
+its handle in the variable 'handle':
 
-Here, we create an instance of nft_string, and save its handle in variable h:
+    nft_string * object = nft_string_create(nft_string_class, sizeof(nft_string), "my substring");
+    nft_handle   handle = object->core.handle;
 
-    nft_string * o = nft_string_create(nft_string_class, sizeof(nft_string), "my substring");
-    nft_handle h = o->core.handle;
+The handle can be used to obtain a copy of the original object pointer,
+via nft_core_lookup. Because nft_core_lookup creates an new reference to
+the object, the object's reference count is incremented by nft_core_lookup,
+and so we must discard the reference when we are done with it. You should
+never assume that lookup will succeed, because your API can easily be 
+given a handle for an object that has been destroyed. so your code should
+always look like this:
 
-The handle can be used to obtain a copy of the original object pointer.
-Because it is an independent reference, the object's reference count
-is incremented by nft_core_lookup, so we must discard the reference 
-when we are done with it. You should never assume that lookup will
-succeed, so your code should always look like this:
-
-    nft_core * pointer = nft_core_lookup(h);
+    nft_core * pointer = nft_core_lookup(handle);
     if (pointer != NULL) {
         ...
         nft_core_discard(pointer);
     }
 
-The difficulty is that the pointer returned by nft_core_lookup is really an
+In the example above, the pointer returned by nft_core_lookup is really an
 instance of nft_string. To be type safe, We must use nft_string_cast to safely
-typecast the nft_core*, and we need to pass &s->core to nft_core_discard:
+typecast the nft_core *, and we need to pass &s->core to nft_core_discard:
 
-    nft_string * s = nft_string_cast(nft_core_lookup(h));
-    if (s) {
+    nft_string * pointer = nft_string_cast(nft_core_lookup(handle));
+    if (pointer) {
         ...
-        nft_core_discard(&s->core);
+        nft_core_discard(&pointer->core);
     }
 
 We can use macros to create type-safe wrappers that clean up the code above.
-First, let's give handles of nft_string objects their own type, nft_string_h:
+First, let's give handles of nft_string objects their own type, nft_string_h,
+so that we can have strong static type-checking on handles:
 
     typedef struct nft_string_h * nft_string_h;
 
@@ -419,17 +420,17 @@ And, a wrapper for nft_core_discard:
     }
 
 These wrapper functions provide clean, strongly-typed APIs to manipulate
-nft_string handles and references:
+nft_string handles and references. Using these wrapper functions,
+our example fragment can be coded much more cleanly:
 
-    nft_string * o = nft_string_create(nft_string_class, sizeof(nft_string), "my substring");
-    nft_string_h h = nft_string_handle(o);
+    nft_string * object = nft_string_lookup(handle);
+    if (object != NULL) {
+        ...
+	nft_string_discard(object);
+    }
 
-    nft_string * s = nft_string_lookup(h);
-    nft_string_discard(s);
-
-These wrapper functions can easily be defined via macros. Note that 
-these functions each have a macro to declare the prototype, and another
-to define the function:
+These wrapper functions can easily be defined via macros. Note that these functions
+each have a macro to declare the prototype, and another to define the function:
 
 #define NFT_TYPEDEF_HANDLE(subclass) \
 typedef struct subclass##_h * subclass##_h;

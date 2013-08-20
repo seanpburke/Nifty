@@ -533,7 +533,10 @@ nft_hash_analyze(nft_hash	*table)
 /******************************************************************************/
 /******************************************************************************/
 #ifdef MAIN
-
+#ifdef NDEBUG
+#undef NDEBUG  // Enable asserts for test code.
+#endif
+#include <assert.h>
 #include <sys/types.h>
 #ifndef WIN32
 #include <sys/times.h>
@@ -599,17 +602,17 @@ main(int argc, char *argv[])
     TIME;			/* compute time usage */
     fprintf(stderr,"Time to insert %ld keys: %.2fu %.2fs\n", i, usert, syst);
 
-    /* Search all keys */
+    // Search all keys
     MARK;			/* record start time */
     for (key = keys[i = 0]; i < nkeys; key = keys[++i])
 	assert(nft_hash_search(t, &key, &value));
     TIME;			/* compute time usage */
     fprintf(stderr,"Time to search %ld keys: %.2fu %.2fs\n", i, usert, syst);
 
-    /* Print out the hash distribution */
-    nft_hash_analyze(t);
+    // Print out the hash distribution
+    // nft_hash_analyze(t);
 
-    /* Delete all keys */
+    // Delete all keys
     MARK;			/* record start time */
     for (key = keys[i = 0]; i < nkeys; key = keys[++i])
 	assert(nft_hash_delete(t, &key, &value));

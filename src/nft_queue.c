@@ -73,18 +73,9 @@ NFT_DEFINE_WRAPPERS(nft_queue,);
 //
 #define SHUTDOWN(q) (0 != q->shutdown)
 
-/*----------------------------------------------------------------------
- * queue_validate - Validate the consistency of the queue.
- *----------------------------------------------------------------------
- */
-static int
-queue_validate( nft_queue * q)
-{
-    assert(q->first < q->size);
-    assert(q->next  < q->size);
-    assert((q->first != -1) || (q->next == 0));
-    return 1;
-}
+#define VALIDATE(q) assert(q->first < q->size);\
+                    assert(q->next  < q->size);\
+                    assert((q->first != -1) || (q->next == 0))
 
 /*----------------------------------------------------------------------
  *  queue_grow() - Allocate more space for q->array.
@@ -94,11 +85,11 @@ queue_validate( nft_queue * q)
 static int
 queue_grow(nft_queue * q)
 {
-    assert(queue_validate(q));
+    VALIDATE(q);
     assert(GROW(q));
-
+#ifndef NDEBUG
     int count = COUNT(q);
-
+#endif
     // Double the size of the array - the logic below assumes this.
     // Don't let new size exceed max signed integer.
     int nsize = 2 * q->size;
@@ -130,7 +121,7 @@ queue_grow(nft_queue * q)
     q->array = new;
     q->size  = nsize;
     assert(COUNT(q) == count);
-    assert(queue_validate(q));
+    VALIDATE(q);
 
     return 0;
 }
@@ -143,7 +134,7 @@ queue_grow(nft_queue * q)
 static void
 queue_shrink(nft_queue * q)
 {
-    assert(queue_validate(q));
+    VALIDATE(q);
     assert(SHRINK(q));
 
     int count = COUNT(q);
@@ -178,7 +169,7 @@ queue_shrink(nft_queue * q)
     q->size = nsize;
 
     assert(COUNT(q) == count);
-    assert(queue_validate(q));
+    VALIDATE(q);
 }
 
 /*----------------------------------------------------------------------
@@ -222,8 +213,8 @@ queue_wait(nft_queue * q, int timeout)
     // Otherwise, we assume it is full, and wait to become non-LIMIT.
     //
     assert(EMPTY(q) || LIMIT(q));
-    int empty = EMPTY(q);
-    int result;
+    int empty  = EMPTY(q);
+    int result = 0;
 
     // Push a cancellation cleanup handler in case we get cancelled.
     pthread_cleanup_push(queue_cleanup, q);
@@ -731,12 +722,13 @@ nft_queue_state( nft_queue_h h)
 /******************************************************************************/
 /******************************************************************************/
 #ifdef MAIN
-
+#ifdef NDEBUG
+#undef NDEBUG  // Assertions must be active in test code.
+#endif
 #include <assert.h>
 #include <ctype.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
 
 /* Strings are used for the simple tests.
  */
@@ -909,11 +901,7 @@ main()
     fprintf(stderr, "words in: %d	words out: %d\n", countin, countout);
     assert(countin == countout);
 
-#ifdef NDEBUG
-    fprintf(stderr, "You must recompile this test driver without NDEBUG!\n");
-#else
     fprintf(stderr, "All tests passed.\n");
-#endif
     exit(0);
 }
 
