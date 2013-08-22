@@ -151,12 +151,13 @@ rescan: // Scan for the next open slot in the HandleMap
 static nft_core *
 nft_handle_lookup(nft_handle handle)
 {
+    nft_core * object = NULL;
+
     // NULL is an invalid handle by definition.
     if (!handle) return NULL;
 
     int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
     unsigned   index  = handle_hash(handle, HandleMapSize);
-    nft_core * object = NULL;
 
     // The handle is only valid if it matches the handle in the table.
     if (handle == HandleMap[index].handle)
@@ -185,7 +186,6 @@ nft_handle_discard(nft_handle handle)
     if (!handle) return count;
 
     int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-
     unsigned long index = handle_hash(handle, HandleMapSize);
 
     // The handle is only valid if it matches the handle in the table.
@@ -193,15 +193,11 @@ nft_handle_discard(nft_handle handle)
     {
 	nft_core * object = HandleMap[index].object;
 
-	// Sanity checks - If the handle were already deleted,
-	// a different handle could be hashed to this index.
-	// But a handle should not be deleted twice.
+	// Sanity check - Does this handle really refer to this object?
 	assert(handle == object->handle);
 
-	if (!(count = --object->reference_count)) {
+	if (!(count = --object->reference_count))
 	    HandleMap[index] = (nft_handle_map){ NULL, NULL };
-	    object->handle   = NULL;
-	}
     }
     rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
     return count;
@@ -398,8 +394,9 @@ nft_string_tests()
     r = nft_string_lookup(h);
     assert(r == NULL);
 
-    // We can safely call nft_string_change because it ignores stale handles.
-    nft_string_change(h, "third try");
+    // We can safely call nft_string_change, even though the object
+    // has been freed, because stale handles are ignored.
+    nft_string_change(h, "using stale handle");
 }
 
 
@@ -443,7 +440,7 @@ main(int argc, char *argv[])
     // First, perform the basic tests.
     basic_tests();
 
-    // Now, test use nft_core as a base class.
+    // Now, test nft_string, which uses nft_core as a base class.
     nft_string_tests();
 
     printf("All tests passed.\n");
