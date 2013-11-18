@@ -538,7 +538,7 @@ nft_hash_analyze(nft_hash	*table)
 #endif
 #include <assert.h>
 #include <sys/types.h>
-#ifndef WIN32
+#ifndef _WIN32
 #include <sys/times.h>
 #include <sys/resource.h>
 #else
@@ -564,7 +564,7 @@ main(int argc, char *argv[])
 #ifndef CLK_TCK
 #define CLK_TCK 100
 #endif
-#if !defined(WIN32)
+#if !defined(_WIN32)
     struct tms	start, done;
     float		usert, syst, tick = 1.0 / CLK_TCK;
 #define MARK	times(&start)
@@ -572,15 +572,12 @@ main(int argc, char *argv[])
     usert = (done.tms_utime - start.tms_utime) * tick; \
     syst  = (done.tms_stime - start.tms_stime) * tick
 
-#else /* WIN32 */
+#else /* _WIN32 */
     clock_t start, done;
-
-#define MARK start=clock();
-
     double usert = 0, syst;
+#define MARK start=clock();
 #define TIME syst=(double)(clock() - start) /  CLOCKS_PER_SEC;
-
-#endif /* WIN32 */
+#endif /* _WIN32 */
 
     // Set limit on keys.
     limit  = ((argc > 1) ? atoi(argv[1]) : MAXKEYS);

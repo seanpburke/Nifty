@@ -1,5 +1,5 @@
 /******************************************************************************
- * (C) Copyright Xenadyne Inc, 2002  All rights reserved.
+ * (C) Copyright Xenadyne Inc, 2002 - 2013 ALL RIGHTS RESERVED.
  *
  * Permission to use, copy, modify and distribute this software for
  * any purpose and without fee is hereby granted, provided that the
@@ -56,7 +56,7 @@
 // Uncomment this definition to run the TaskThread at elevated priority.
 // #define USE_REALTIME_SCHEDULING
 
-#if    defined(USE_REALTIME_SCHEDULING) && !defined(WIN32)
+#if    defined(USE_REALTIME_SCHEDULING) && !defined(_WIN32)
 #include <unistd.h>
 #if    defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
 #include <sched.h>
@@ -466,7 +466,7 @@ nft_task_this(void)
 /*******		HEAP IMPLEMENTATION				*******/
 /*******								*******/
 /******************************************************************************/
-#ifdef WIN32
+#ifdef _WIN32
 #define inline __inline
 #endif
 
@@ -719,7 +719,7 @@ heap_delete(heap_t *heap, unsigned int index)
 #endif
 #include <assert.h>
 #include <stdio.h>
-#ifndef WIN32
+#ifndef _WIN32
 #include <unistd.h>
 #else
 #define sleep(n)  _sleep(n*1000)

@@ -50,7 +50,7 @@
 #ifdef    USE_FTIME
 #include <sys/types.h>
 #include <sys/timeb.h>
-#ifndef WIN32
+#ifndef _WIN32
 #include <sys/time.h>
 #else
 struct timespec
@@ -58,7 +58,7 @@ struct timespec
 	time_t tv_sec;
 	long   tv_nsec;
 };
-#endif /* WIN32 */
+#endif /* _WIN32 */
 #endif /* USE_FTIME */
 
 

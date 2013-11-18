@@ -1,5 +1,5 @@
 /******************************************************************************
- * (C) Copyright Xenadyne, Inc. 2002  All rights reserved.
+ * (C) Copyright Xenadyne, Inc. 2002-2013  ALL RIGHTS RESERVED.
  * 
  * Permission to use, copy, modify and distribute this software for
  * any purpose and without fee is hereby granted, provided that the 
@@ -53,7 +53,7 @@
 #ifndef nft_win32_h
 #define nft_win32_h
 
-#ifdef WIN32
+#ifdef _WIN32
 /*
  * Set various WIN32 flags
  */
@@ -97,9 +97,7 @@
 #define NODEFERWINDOWPOS
 #define NOMCX
 
-/*
- * Enable NT-4.0 specific API's.
- */
+// Enable NT-4.0 specific API's.
 #define _WIN32_WINNT	0x0400
 
 #include <windows.h>
@@ -111,13 +109,10 @@
 #endif
 
 
-/*
- * The following definitions provide a pthread subset on WIN32.
- */
-
-/*
- * Threads
- */
+//________________________________________________________________________________________
+//
+// The following definitions provide a pthread subset on WIN32.
+//
 typedef HANDLE pthread_t;
 
 typedef struct
@@ -136,9 +131,7 @@ int  pthread_join  (pthread_t h_thread, void ** val_p);
 void pthread_exit  (void    * value);
 
 
-/*
- * Thread attributes.
- */
+// Thread attributes.
 #define PTHREAD_CREATE_DETACHED	1
 #define PTHREAD_CREATE_JOINABLE	2
 
@@ -152,9 +145,7 @@ int pthread_attr_setstacksize	(pthread_attr_t *attr, unsigned stack_size);
 int pthread_attr_destroy  (const pthread_attr_t *attr);
 
 
-/*
- * Mutexes
- */
+// Mutexes
 typedef HANDLE pthread_mutex_t;
 
 typedef struct
@@ -172,19 +163,12 @@ int pthread_mutex_destroy(pthread_mutex_t *mp);
 #define PTHREAD_MUTEXATTR_DEFAULT ((pthread_mutexattr_t *) 0)
 
 
-/*
- * Condition variables.
- */
+// Condition variables.
 typedef struct
 {
-    int waiters_count_;
-    /* Number of waiting threads. */
-
-    CRITICAL_SECTION waiters_count_lock_;
-    /* Serialize access to <waiters_count_>. */
-
-    HANDLE sema_;
-    /* Semaphore used to queue up threads waiting for the condition */
+    int waiters_count_;		 		// Number of waiting threads.
+    CRITICAL_SECTION waiters_count_lock_;	// Serialize access to <waiters_count_>.
+    HANDLE sema_;			        // Semaphore used to queue waiting threads.
 
 } pthread_cond_t;
 
@@ -205,15 +189,10 @@ int pthread_cond_broadcast(pthread_cond_t *cond);
 int pthread_cond_destroy(pthread_cond_t *cond);
 
 
-/*
- * pthread_oonce()
- *
- * The pthread_once_t records whether an init_routine has been run.
- */
-typedef void * pthread_once_t;
-
+// pthread_once() - The pthread_once_t records whether an init_routine has been run.
 #define PTHREAD_ONCE_INIT 0
 
+typedef void   * pthread_once_t;
 int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
 
 
@@ -230,7 +209,6 @@ typedef struct _cleanup {
     void  *argument;
 } _cleanup_t;
 
-
 #define	pthread_cleanup_push(fun, arg) { \
 	_cleanup_t _cleanup_info; 	 \
 	_cleanup_info.function = (fun);	 \
@@ -239,10 +217,7 @@ typedef struct _cleanup {
 #define	pthread_cleanup_pop(ex) \
 	if (ex) (_cleanup_info.function(_cleanup_info.argument)); }
 
-
-/*
- * Semaphores
- */
+// Semaphores
 typedef HANDLE sem_t;
 
 int sem_init(sem_t *sem, int pshared, unsigned int value);
@@ -250,10 +225,7 @@ int sem_wait(sem_t *sem);
 int sem_post(sem_t *sem);
 int sem_destroy(sem_t *sem);
 
-
-/*
- * Readers/Writer locks use the nft_rwlock implementation.
- */
+// Readers/Writer locks use the nft_rwlock implementation.
 #include <nft_rwlock.h>
 typedef nft_rwlock_t pthread_rwlock_t;
 #define pthread_rwlock_init(lock, attr)		nft_rwlock_init(lock)
@@ -263,7 +235,6 @@ typedef nft_rwlock_t pthread_rwlock_t;
 #define pthread_rwlock_trywrlock		nft_rw_wrtrylock(lock)
 #define pthread_rwlock_unlock(lock)		nft_rw_unlock(lock)
 
+#endif // _WIN32
 
-#endif /* WIN32 */
-
-#endif /* nft_win32_h */
+#endif // nft_win32_h

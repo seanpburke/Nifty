@@ -29,6 +29,17 @@
 #ifndef _nft_core_header
 #define _nft_core_header
 
+// Since all Nifty-based code must ultimately include this header,
+// this is a convenient place to choose pthread.h or nft_win32.h.
+//
+#ifdef _WIN32
+#include <nft_win32.h>
+#else
+#include <pthread.h>
+#endif
+
+
+
 #define nft_core_class "nft_core"
 
 typedef void * nft_handle;

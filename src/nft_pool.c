@@ -364,7 +364,7 @@ nft_pool_shutdown(nft_pool_h handle, int timeout)
 #endif
 #include <assert.h>
 #include <stdio.h>
-#ifndef WIN32
+#ifndef _WIN32
 #include <unistd.h>
 #else
 #include <winbase.h>
@@ -431,7 +431,7 @@ basic_tests(void)
     /* The following tests fail on WIN32, either because cancellation
      * is not supported, or the cleanup handlers aren't run on thread exit.
      */
-#ifndef WIN32
+#ifndef _WIN32
     // The test_exit function will call pthread_exit from the pool thread.
     fputs("Test 3: Call pthread_exit from pool thread ", stderr);
     pool = nft_pool_create(-1, 0, 0); assert(pool != NULL);
@@ -495,7 +495,7 @@ basic_tests(void)
     // Discard our handle
     nft_pool_discard(pref);
     fputs("passed.\n", stderr);
-#endif // WIN32
+#endif // _WIN32
 
     // Stress/Performance test - push many work items through the queue.
     int n = 100000;

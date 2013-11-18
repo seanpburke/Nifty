@@ -27,7 +27,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef WIN32
+#ifndef _WIN32
 #include <strings.h>
 #include <unistd.h>
 #endif
@@ -1098,7 +1098,7 @@ t5( void)
 static void
 t6( void)
 {
-#ifndef WIN32	// no pthread_cancel() on WIN32
+#ifndef _WIN32	// no pthread_cancel() on WIN32
 
     fprintf(stderr, "t6 (add/cancel): ");
 
@@ -1123,7 +1123,7 @@ t6( void)
     assert(0 == nft_queue_shutdown(q,0));
 
     fprintf(stderr, "passed.\n");
-#endif // WIN32
+#endif // _WIN32
 }
 
 
@@ -1133,7 +1133,7 @@ t6( void)
 static void
 t7( void)
 {
-#ifndef WIN32	// no pthread_cancel() on WIN32
+#ifndef _WIN32	// no pthread_cancel() on WIN32
 
     fprintf(stderr, "t7 (pop/cancel): ");
 
@@ -1159,7 +1159,7 @@ t7( void)
     assert(0 == nft_queue_shutdown(q, 1));
 
     fprintf(stderr, "passed.\n");
-#endif // WIN32
+#endif // _WIN32
 }
 
 #endif	// MAIN

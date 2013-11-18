@@ -217,7 +217,6 @@ int	nft_queue_state( nft_queue_h h);
  *
  ******************************************************************************
  */
-#include <pthread.h>
 #include <nft_core.h>
 
 /* struct nft_queue

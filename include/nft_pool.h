@@ -34,8 +34,6 @@
 #ifndef _nft_pool_header
 #define _nft_pool_header
 
-#include <pthread.h>
-
 typedef struct nft_pool_h * nft_pool_h;
 
 /* nft_pool_create: Initialize a thread pool.
@@ -119,7 +117,6 @@ int nft_pool_shutdown(nft_pool_h pool, int timeout);
  *
  ******************************************************************************
  */
-#include <pthread.h>
 #include <nft_queue.h>
 
 typedef struct nft_pool		// Structure describing a thread pool.
