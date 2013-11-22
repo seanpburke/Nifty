@@ -35,48 +35,46 @@
 #ifndef _nft_gettime_header
 #define _nft_gettime_header
 
-#include <time.h>
-
+// Select the default time source by uncommenting one of these defines:
+//
 #if !defined(USE_FTIME) && !defined(USE_GETTIMEOFDAY) && !defined(USE_CLOCKGETTIME)
-/*
- * Select the default time source by uncommenting one of these defines:
- */
 #define USE_FTIME        1
 // #define USE_GETTIMEOFDAY 1
 // #define USE_CLOCKGETTIME 1
 #endif
 
-
-#ifdef    USE_FTIME
+#if defined(USE_FTIME)
 #include <sys/types.h>
 #include <sys/timeb.h>
-#ifndef _WIN32
+#elif defined(USE_GETTIMEOFDAY)
 #include <sys/time.h>
-#else
-struct timespec
-{
-	time_t tv_sec;
-	long   tv_nsec;
-};
-#endif /* _WIN32 */
-#endif /* USE_FTIME */
-
-
-#ifdef    USE_GETTIMEOFDAY
-#include <sys/time.h>
-#endif /* USE_GETTIMEOFDAY */
-
+#elif defined(USE_CLOCKGETTIME)
+#include <time.h>
+#endif
 
 #ifndef NANOSEC
 #define NANOSEC         1000000000
 #endif
 
+// Ensure that struct timespec is defined.
+//
+#ifndef _WIN32
+#include <sys/time.h>
+#else
+struct	timespec {
+	time_t tv_sec;
+	long   tv_nsec;
+};
+#endif
+
+// nft_gettime returns the current time as a struct timespec, converting if necessary.
+//
 static struct timespec
 nft_gettime(void)
 {
 #if defined(USE_FTIME)
     struct timeb tb;
-    int rc = ftime( &tb ); assert(rec == 0);
+    ftime( &tb );
     return (struct timespec){ tb.time, tb.millitm * 1000000 };	/* milli to nano secs  */
 
 #elif defined(USE_GETTIMEOFDAY)
@@ -86,7 +84,7 @@ nft_gettime(void)
 
 #elif defined(USE_CLOCKGETTIME)
     struct timespec ts;
-    int rc = clock_gettime(CLOCK_REALTIME, &ts); assert(rec == 0);
+    int rc = clock_gettime(CLOCK_REALTIME, &ts); assert(rc == 0);
     return ts;
 #endif
 }

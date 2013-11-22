@@ -19,19 +19,15 @@
  *
  *********************************************************************** 
  */
-#ifdef _WIN32
-
 #include <assert.h>
 #include <errno.h>
-#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <nft_gettime.h>
+#ifdef _WIN32
 #include <nft_win32.h>
 
-
-#define PError(funcName) fprintf(stderr, "Error: %s returned error %d\n", funcName, GetLastError());
+#define PError(funcName) fprintf(stderr, "Error: %s returned error %d\n", funcName, (int)GetLastError());
 
 // This struct allows us to pass the user's (start_func, arg) to thread_top.
 struct thread_parms
@@ -164,13 +160,11 @@ int pthread_attr_destroy(const pthread_attr_t *attr)
 //
 int pthread_mutex_init (pthread_mutex_t *mp, const pthread_mutexattr_t *attr)
 {
-    if (NULL == mp)
-	return EINVAL;
+    if (!mp) return EINVAL;
 
-    *mp = CreateMutex(NULL, FALSE, NULL);
-    if (!*mp) {
+    if (!(*mp = CreateMutex(NULL, FALSE, NULL))) {
 	PError("CreateMutex");
-	return -1;
+	return EPERM;
     }
     return 0;
 }
@@ -311,7 +305,7 @@ pthread_cond_wait (pthread_cond_t *cv,
 //	ETIMEDOUT	Condition was not signaled during timeout interval.
 //
 int
-pthread_cond_timedwait (pthread_cond_t *cv,
+pthread_cond_timedwait (pthread_cond_t  *cv,
 			pthread_mutex_t *external_mutex,
 			const struct timespec *abstime)
 {
@@ -321,11 +315,10 @@ pthread_cond_timedwait (pthread_cond_t *cv,
     // If an abstime is given, compute the wait time, which is a relative 
     // interval in milliseconds, from the absolute time parameter.
     if (abstime != NULL) {
-	struct timeb currtm;
+	struct timespec currtm = nft_gettime();
 
-	ftime(&currtm);
-	wait  = (abstime->tv_sec - currtm.time) * 1000;
-	wait += (abstime->tv_nsec/1000000 - currtm.millitm);
+	wait  = (abstime->tv_sec  - currtm.tv_sec ) * 1000;
+	wait += (abstime->tv_nsec - currtm.tv_nsec) / 1000000;
 
 	if (wait < 10) wait = 10;
     }
@@ -352,10 +345,7 @@ pthread_cond_timedwait (pthread_cond_t *cv,
 
     // Reacquire lock to avoid race conditions.
     EnterCriticalSection (&cv->waiters_count_lock_);
-
-    // We're no longer waiting...
     cv->waiters_count_--;
-
     LeaveCriticalSection (&cv->waiters_count_lock_);
 
     // Always regain the external mutex before returning.
@@ -466,14 +456,14 @@ int pthread_once (pthread_once_t  *once_control,
      *   1 - init_routine currently executing.
      *   2 - init_routine has completed.
      */
-    if (*once_control != (void*) 2)
+    if (*once_control != 2)
     {
 	/* InterlockedCompareExchange atomically compares *once_control to 0,
 	 * and if they are equal sets *once_control to 1, returning the
 	 * original value of *once_control. This ensures that init_routine()
 	 * is only run once for a given once_control.
 	 */
-	if (InterlockedCompareExchange(once_control, (void*) 1, (void*) 0) == 0)
+	if (InterlockedCompareExchange(once_control, 1, 0) == 0)
 	{
 	    (*init_routine)();
 
@@ -482,7 +472,7 @@ int pthread_once (pthread_once_t  *once_control,
 	}
 	else {
 	    // Spin-yield while other thread is executing init_routine.
-	    while (*once_control != (void*) 2)
+	    while (*once_control != 2)
 		Sleep(0);
 	}
     }
@@ -492,4 +482,77 @@ int pthread_once (pthread_once_t  *once_control,
 #endif // _WIN32
 
 
+/******************************************************************************/
+/******************************************************************************/
+/*******								*******/
+/*******		WIN32 PACKAGE UNIT TEST				*******/
+/*******								*******/
+/******************************************************************************/
+/******************************************************************************/
+#ifdef MAIN
+#ifdef NDEBUG
+#undef NDEBUG  // Assertions must be active in test code.
+#include <assert.h>
+#endif
+/*
+ * We build and run this unit test on unix platforms too,
+ * but that only shows that the tests are correct.
+ */
+#ifndef _WIN32
+#include <pthread.h>
+#endif
 
+static pthread_once_t   Once  = PTHREAD_ONCE_INIT;
+static pthread_mutex_t	Mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t	Cond  = PTHREAD_COND_INITIALIZER;
+static pthread_t	Thread;
+
+void
+once_function(void) {
+    int rc;
+    rc = pthread_cond_init (&Cond,  NULL); assert(rc == 0);
+    rc = pthread_mutex_init(&Mutex, NULL); assert(rc == 0);
+}
+
+static volatile int Locked = 0;
+void *
+thread_function(void * arg) {
+    int  rc;
+    rc = pthread_mutex_lock(&Mutex);   assert(rc == 0);
+    Locked = 1;
+    rc = pthread_cond_signal(&Cond);   assert(rc == 0);
+    rc = pthread_mutex_unlock(&Mutex); assert(rc == 0);
+    return (void*) 57;
+}
+
+int
+main()
+{
+    // The Mutex and Cond must be initialized dynamically in WIN32.
+    int rc = pthread_once(&Once, once_function); assert(rc == 0);
+
+    // Show that we can lock the mutex, signal the condition, and unlock.
+    rc = pthread_mutex_lock(&Mutex);   assert(rc == 0);
+    rc = pthread_cond_signal(&Cond);   assert(rc == 0);
+    rc = pthread_mutex_unlock(&Mutex); assert(rc == 0);
+
+    // Next, lock the mutex, launch a thread, and wait for a signal.
+    rc = pthread_mutex_lock(&Mutex);   assert(rc == 0);
+    rc = pthread_create(&Thread, NULL, thread_function, NULL); assert(rc == 0);
+    rc = pthread_cond_wait(&Cond, &Mutex); assert(rc == 0);
+    assert(1 == Locked);
+    rc = pthread_mutex_unlock(&Mutex); assert(rc == 0);
+
+    // Join the thread that we launched, and verify the result.
+    void * value;
+    rc = pthread_join(Thread, &value); assert(rc == 0);
+    assert(57 == (int)value);
+
+    // TODO: The tests above are very basic.
+    // Should add some more severe testing.
+
+    fprintf(stderr, "nft_win32: All tests passed.\n");
+    exit(0);
+}
+
+#endif // MAIN
