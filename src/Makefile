@@ -30,7 +30,7 @@ LDLIBS		=				# MacOSX, MinGW
 #
 # You should not need to alter the definitions below.
 #
-VERSION = 0.92
+VERSION = 0.93
 LIBDIR	= ../lib
 LIB	= $(LIBDIR)/libnifty.a
 SRCS	= nft_core.c nft_hash.c nft_pool.c nft_queue.c nft_task.c nft_win32.c

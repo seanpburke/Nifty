@@ -509,15 +509,21 @@ simply do:
 ================================================================================
 WIN32 Notes
 
-Nifty provides its own pthread emulation layer for use on WIN32, which we call
-nft_win32. In comparison to pthread_win32, nft_win32 has many limitations,
-so you should use pthread_win32 if that is at all possible. We have coded the
-Nifty packages to work within the limitations of nft_win32, and if you wish to
-use it, you you should study the warnings in nft_win32.h, in order to understand
-those limitations.
+Nifty can be built for WIN32 using MinGW. Earlier versions of Nifty were
+buildable using Visual Studio 6, and as far as I know, this is still possible,
+but I have not tried to build the current release with Visual Studio.
 
-I do intend to provide a MINGW makefile for WIN32 development, but that is
-still in the future. Up to now, I have built nft_win32 using Visual Studio 6.
+I recommend the pthread_win32 library to provide the POSIX pthread API.
+MinGW provides a pthread_win32 package, or you can obtain sources from
+the project site http://sourceware.org/pthreads-win32/.  Alternatively,
+Nifty does provide an optional pthread emulation layer for use on WIN32,
+which we call nft_win32.
 
+In comparison to pthread_win32, nft_win32 has many limitations, so you
+should use pthread_win32 if that is at all possible. We have coded the
+Nifty packages to work within the limitations of nft_win32, and if you
+wish to use it, you should study the warnings in nft_win32.h. Nifty
+builds on MinGW using nft_win32 by default, so you will need to make
+adjustments in order to use pthread_win32.
 
 
