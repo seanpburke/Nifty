@@ -31,7 +31,6 @@
 #include <errno.h>
 #include <stdlib.h>
 
-#include <nft_gettime.h>
 #include <nft_pool.h>
 
 // Define helper functions nft_pool_cast, _handle, _lookup, and _discard.
@@ -366,9 +365,6 @@ nft_pool_shutdown(nft_pool_h handle, int timeout)
 #include <stdio.h>
 #ifndef _WIN32
 #include <unistd.h>
-#else
-#include <winbase.h>
-#define sleep(n) _sleep(n*1000)
 #endif
 
 volatile int flags[10] = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
@@ -502,7 +498,7 @@ basic_tests(void)
     fprintf(stderr, "Test 5: processing %d tasks...", n);
     pool = nft_pool_create(-1, 2, 0);
     for (int i = 0; i < n; i++) {
-	rc = nft_pool_add(pool, (void(*)(void*)) random, NULL); assert(rc == 0);
+	rc = nft_pool_add(pool, (void(*)(void*)) rand, NULL); assert(rc == 0);
     }
     rc = nft_pool_shutdown(pool, -1);
     assert(rc == 0);
@@ -629,7 +625,7 @@ main(int argc, char *argv[])
 
     test_nft_action_pool();
 
-    printf("All tests passed.\n");
+    printf("nft_pool: All tests passed.\n");
     exit(0);
 }
 #endif // MAIN

@@ -37,7 +37,7 @@
 #ifndef _NFT_TASK_H_
 #define _NFT_TASK_H_
 
-#include <time.h> // for struct timespec
+#include "nft_gettime.h" // for struct timespec
 
 /* All of the client APIs refer the task object by its handle.
  * The handle is just an integer, but we define it as a pointer

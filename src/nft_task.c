@@ -48,9 +48,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
 
-#include <nft_gettime.h>
 #include <nft_task.h>
 
 // Uncomment this definition to run the TaskThread at elevated priority.
@@ -722,7 +720,6 @@ heap_delete(heap_t *heap, unsigned int index)
 #ifndef _WIN32
 #include <unistd.h>
 #else
-#define sleep(n)  _sleep(n*1000)
 #define random    rand
 #endif
 
@@ -1174,7 +1171,7 @@ main(int argc, char *argv[])
     // Test the subclass implementation
     test_nft_task_pool();
 
-    printf("All tests passed.\n");
+    printf("nft_task: All tests passed.\n");
     exit(0);
 }
 

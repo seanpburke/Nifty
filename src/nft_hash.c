@@ -573,10 +573,10 @@ main(int argc, char *argv[])
     syst  = (done.tms_stime - start.tms_stime) * tick
 
 #else /* _WIN32 */
-    clock_t start, done;
-    double usert = 0, syst;
+    clock_t start;
+    double usert, syst=0;
 #define MARK start=clock();
-#define TIME syst=(double)(clock() - start) /  CLOCKS_PER_SEC;
+#define TIME usert=(double)(clock() - start) /  CLOCKS_PER_SEC;
 #endif /* _WIN32 */
 
     // Set limit on keys.
@@ -637,6 +637,7 @@ main(int argc, char *argv[])
 
     for (i = 0; i < nkeys; i++)	free(keys[i]);
 
+    fprintf(stderr, "nft_hash: All tests passed.\n");
     exit(0);
 }
 #endif // MAIN

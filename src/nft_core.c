@@ -29,7 +29,6 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
 
 #include <nft_core.h>
 
@@ -513,7 +512,7 @@ main(int argc, char *argv[])
     // Now, test nft_string, which uses nft_core as a base class.
     nft_string_tests();
 
-    printf("All tests passed.\n");
+    printf("nft_core: All tests passed.\n");
     exit(0);
 }
 

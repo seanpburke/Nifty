@@ -5,8 +5,10 @@ src/nft_hash
 src/nft_pool
 src/nft_queue
 src/nft_task
+src/nft_win32
 lib/libnifty.a
 
 # For XCode on MacOSX
 src/*.dSYM
+src/*.exe
 src/Nifty-*

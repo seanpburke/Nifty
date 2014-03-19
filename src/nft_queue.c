@@ -31,10 +31,7 @@
 #include <strings.h>
 #include <unistd.h>
 #endif
-#include <pthread.h>
 
-#include <nft_core.h>
-#include <nft_gettime.h>
 #include <nft_queue.h>
 
 NFT_DEFINE_WRAPPERS(nft_queue,);
@@ -728,7 +725,6 @@ nft_queue_state( nft_queue_h h)
 #include <ctype.h>
 #include <stdio.h>
 
-
 /* Strings are used for the simple tests.
  */
 static char * Strings[] =
@@ -900,7 +896,7 @@ main()
     fprintf(stderr, "words in: %d	words out: %d\n", countin, countout);
     assert(countin == countout);
 
-    fprintf(stderr, "All tests passed.\n");
+    fprintf(stderr, "nft_queue: All tests passed.\n");
     exit(0);
 }
 
@@ -1161,4 +1157,4 @@ t7( void)
 #endif // _WIN32
 }
 
-#endif	// MAIN
+#endif // MAIN

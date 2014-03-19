@@ -33,11 +33,11 @@
 // this is a convenient place to choose pthread.h or nft_win32.h.
 //
 #ifdef _WIN32
-#include <nft_win32.h>
+#include "nft_win32.h"
 #else
 #include <pthread.h>
 #endif
-
+#include <nft_gettime.h>
 
 
 #define nft_core_class "nft_core"

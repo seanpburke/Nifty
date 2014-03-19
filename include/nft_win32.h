@@ -53,9 +53,14 @@
 #ifndef _NFT_WIN32_H_
 #define _NFT_WIN32_H_
 
+#include <nft_gettime.h>
+
 #ifdef _WIN32
-/*
- * Set various WIN32 flags
+
+#define  sleep(n)	Sleep(n * 1000)
+#define usleep(u)	Sleep(u / 1000)
+
+/* Set various WIN32 flags
  */
 #define NOGDICAPMASKS
 #define NOVIRTUALKEYCODES
@@ -98,16 +103,21 @@
 #define NOMCX
 
 // Enable NT-4.0 specific API's.
+#ifndef _WIN32_WINNT
 #define _WIN32_WINNT	0x0400
-
+#endif
 #include <windows.h>
 #include <process.h> /* Thread creation */
 #include <winbase.h> /* synchronization methods */
 
+// Define some error codes that are not in MSVC errno.h.
+// These have equivalents in winsock.h, but that doesn't matter to us.
 #ifndef ETIMEDOUT
-#define ETIMEDOUT	200		/* not in MSVC errno.h, nor equivalent JEB last err ~50 */
+#define ETIMEDOUT	200
 #endif
-
+#ifndef ESHUTDOWN
+#define ESHUTDOWN	201
+#endif
 
 //________________________________________________________________________________________
 //
@@ -192,7 +202,8 @@ int pthread_cond_destroy(pthread_cond_t *cond);
 // pthread_once() - The pthread_once_t records whether an init_routine has been run.
 #define PTHREAD_ONCE_INIT 0
 
-typedef void   * pthread_once_t;
+typedef LONG volatile pthread_once_t;
+
 int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
 
 
@@ -224,16 +235,6 @@ int sem_init(sem_t *sem, int pshared, unsigned int value);
 int sem_wait(sem_t *sem);
 int sem_post(sem_t *sem);
 int sem_destroy(sem_t *sem);
-
-// Readers/Writer locks use the nft_rwlock implementation.
-#include <nft_rwlock.h>
-typedef nft_rwlock_t pthread_rwlock_t;
-#define pthread_rwlock_init(lock, attr)		nft_rwlock_init(lock)
-#define pthread_rwlock_destroy(lock)		nft_rwlock_destroy(lock)
-#define pthread_rwlock_rdlock(lock)		nft_rw_rdlock(lock)
-#define pthread_rwlock_wrlock(lock)		nft_rw_wrlock(lock)
-#define pthread_rwlock_trywrlock		nft_rw_wrtrylock(lock)
-#define pthread_rwlock_unlock(lock)		nft_rw_unlock(lock)
 
 #endif // _WIN32
 
