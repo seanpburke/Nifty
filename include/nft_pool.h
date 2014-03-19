@@ -31,8 +31,8 @@
  *
  ******************************************************************************
  */
-#ifndef _nft_pool_header
-#define _nft_pool_header
+#ifndef _NFT_POOL_H_
+#define _NFT_POOL_H_
 
 typedef struct nft_pool_h * nft_pool_h;
 
@@ -132,14 +132,15 @@ typedef struct nft_pool		// Structure describing a thread pool.
 // Define nft_pool_class, showing derivation from nft_queue.
 #define nft_pool_class nft_queue_class ":nft_pool"
 
-// Define helper functions nft_pool_cast, _handle, _lookup, and _discard.
+// Define helper functions nft_pool_cast, _handle, _lookup, _discard, _list.
 NFT_DECLARE_CAST(nft_pool)
 NFT_DECLARE_HANDLE(nft_pool)
 NFT_DECLARE_LOOKUP(nft_pool)
 NFT_DECLARE_DISCARD(nft_pool)
+NFT_DECLARE_LIST(nft_pool)
 
 nft_pool *
 nft_pool_create_ex(const char * class, size_t size,
 		   int queue_limit, int max_threads, int stack_size);
 
-#endif // _nft_pool_header
+#endif // _NFT_POOL_H_

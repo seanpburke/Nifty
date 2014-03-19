@@ -34,8 +34,8 @@
  *
  *******************************************************************************
  */
-#ifndef _nft_queue_header
-#define _nft_queue_header
+#ifndef _NFT_QUEUE_H_
+#define _NFT_QUEUE_H_
 
 /* The client APIs below refer the queue object by its handle.
  * The handle is just an integer, but we define it as a pointer
@@ -248,11 +248,12 @@ int    nft_queue_enqueue(nft_queue * q, void * item, int timeout, char which);
 int    nft_queue_dequeue(nft_queue * q, int timeout, void ** item);
 void   nft_queue_destroy(nft_core * p);
 
-// Declare helper functions nft_queue_cast, _handle, _lookup, and _discard.
+// Declare helper functions nft_queue_cast, _handle, _lookup, _discard, _list.
 #define nft_queue_class nft_core_class ":nft_queue"
 NFT_DECLARE_CAST(nft_queue)
 NFT_DECLARE_HANDLE(nft_queue)
 NFT_DECLARE_LOOKUP(nft_queue)
 NFT_DECLARE_DISCARD(nft_queue)
+NFT_DECLARE_LIST(nft_queue)
 
-#endif // _nft_queue_header
+#endif // _NFT_QUEUE_H_

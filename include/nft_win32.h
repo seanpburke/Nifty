@@ -50,8 +50,8 @@
  *
  *****************************************************************************
  */
-#ifndef nft_win32_h
-#define nft_win32_h
+#ifndef _NFT_WIN32_H_
+#define _NFT_WIN32_H_
 
 #ifdef _WIN32
 /*
@@ -237,4 +237,4 @@ typedef nft_rwlock_t pthread_rwlock_t;
 
 #endif // _WIN32
 
-#endif // nft_win32_h
+#endif // _NFT_WIN32_H_

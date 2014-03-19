@@ -76,7 +76,7 @@ handle_init(void) {
     assert(HandleMap);
 }
 
-static unsigned
+static inline unsigned
 handle_hash(nft_handle handle, unsigned modulo)
 {
     // For speed's sake, we do binary modulo arithmetic,
@@ -203,6 +203,41 @@ nft_handle_discard(nft_handle handle)
     return count;
 }
 
+// List all the handles of the given class, for diagnostic purposes.
+// Returns a NULL-terminated list of handles to the caller.
+static nft_handle *
+nft_handle_list(const char * class)
+{
+    nft_handle * handles = NULL;
+
+    // Ensure that the handle table and mutex are initialized.
+    int rc = pthread_once(&HandleOnce, handle_init); assert(rc == 0);
+    if (!HandleMap) return NULL;
+
+    rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
+
+    // First, count the number of handles in class.
+    int count = 0;
+    for (unsigned i = 0; i < HandleMapSize; i++)
+	if (nft_core_cast(HandleMap[i].object, class)) count++;
+
+    // Allocate an array to hold the handles, plus a null terminator.
+    if ((handles = malloc((count+1)*sizeof(nft_handle))))
+    {
+	unsigned j = 0;
+	for (unsigned i = 0; i < HandleMapSize; i++)
+	    if (nft_core_cast(HandleMap[i].object, class))
+		handles[j++] = HandleMap[i].handle;
+
+	// Add the terminating NULL handle.
+	assert(j == count);
+	handles[j] = NULL;
+    }
+    rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
+    return handles;
+}
+
+
 /*******************************************************************************
  *
  *		nft_core Public APIs
@@ -286,6 +321,13 @@ nft_core_destroy(nft_core * p)
     }
 }
 
+nft_handle *
+nft_core_list(const char * class)
+{
+    return nft_handle_list(class);
+}
+
+
 /******************************************************************************/
 /******************************************************************************/
 /*******								*******/
@@ -321,6 +363,7 @@ NFT_DECLARE_WRAPPERS(nft_string,)
 // nft_string_h nft_string_handle(const nft_string * s);
 // nft_string * nft_string_lookup(nft_string_h h);
 // void nft_string_discard(nft_string * s);
+// nft_string_h * nft_string_list(void);
 
 // This macro expands to definitions for the prototypes:
 NFT_DEFINE_WRAPPERS(nft_string,)
@@ -350,14 +393,13 @@ nft_string_create(const char * class, size_t size, const char * string)
 }
 
 // This function demonstrates the use of nft_string_lookup/_discard,
-// to implement your class's accessor/mutator APIs.
+// to implement your class's accessor methods.
 void
-nft_string_change(nft_string_h handle, const char * newstring)
+nft_string_print(nft_string_h handle)
 {
     nft_string * object = nft_string_lookup(handle);
     if (object) {
-	free(object->string);
-	object->string = strdup(newstring);
+	fprintf(stderr, "string[%p] => '%s'\n", object->core.handle, object->string);
 	nft_string_discard(object);
     }
 }
@@ -379,10 +421,6 @@ nft_string_tests()
     // so we can safely use r to refer to the original object.
     assert(!strcmp(r->string, "my string"));
 
-    // Test our mutator for nft_string.string:
-    nft_string_change(h, "changed string");
-    assert(!strcmp(r->string, "changed string"));
-
     // Discard the reference we obtained via lookup.
     nft_string_discard(r);
 
@@ -394,9 +432,27 @@ nft_string_tests()
     r = nft_string_lookup(h);
     assert(r == NULL);
 
-    // We can safely call nft_string_change, even though the object
+    // We can safely call nft_string_print, even though the object
     // has been freed, because stale handles are ignored.
-    nft_string_change(h, "using stale handle");
+    nft_string_print(h);
+
+    // nft_string_list returns an array with the handle of every nft_string instance.
+    // It is created automatically by the DEFINE_HELPERS macro, for every Nifty class.
+    // To demonstrate how this works, we first create ten nft_string instances.
+    const char * words[] = { "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", NULL };
+    for (int i = 0; words[i] ; i++ )
+	nft_string_create(nft_string_class, sizeof(nft_string), words[i]);
+
+    // Get an array of handles for all current nft_string instances.
+    // Even if there are no live strings, you will still get an empty array,
+    // but nft_string_list may return NULL if memory is exhausted.
+    nft_string_h * handles = nft_string_list();
+    if (handles) {
+	// The array is terminated by a NULL handle.
+	for (int i = 0; handles[i]; i++) nft_string_print(handles[i]);
+	// Don't forget to free the array.
+	free(handles);
+    }
 }
 
 
@@ -426,12 +482,26 @@ basic_tests()
     // Test handle_map_enlarge
     int        n = 10000;
     nft_core * parray[n];
-    for (int i = 0; i < n; i++) {
+    for (int i = 0; i < n; i++)
 	parray[i] = nft_core_create(nft_core_class, sizeof(nft_core));
-    }
-    for (int i = 0; i < n; i++) {
+
+    // Confirm that the objects we created are all present.
+    nft_handle * handles = nft_core_list(nft_core_class);
+    int i = 0;
+    while (handles[i]) i++;
+    assert(i == n);
+    free(handles);
+
+    // Now discard all of the object references, freeing the objects.
+    for (int i = 0; i < n; i++)
 	nft_core_discard(parray[i]);
-    }
+
+    // Confirm that all objects have been destroyed.
+    handles = nft_core_list(nft_core_class);
+    i = 0;
+    while (handles[i]) i++;
+    assert(i == 0);
+    free(handles);
 }
 
 int

@@ -420,10 +420,9 @@ nft_queue_destroy(nft_core * p)
  *
  * ( Why the "_ex" suffix? Because we want nft_queue_create to be
  *   a clean API for code that uses nft_queue's encapsulated API.
- *   In nft_queue.h, nft_queue_create is a macro that expands to
- *   nft_queue_create_f. Only subclasses need to vary the class
- *   and size parameters, so only subclasses need to call this
- *   function directly. See nft_pool.c for example. )
+ *   Only subclasses need to vary the class and size parameters,
+ *   so only subclasses need to call this function directly.
+ *   See nft_pool.c for example. )
  *----------------------------------------------------------------------
  */
 nft_queue *

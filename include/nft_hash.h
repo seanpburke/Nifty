@@ -22,8 +22,8 @@
  *
  *********************************************************************
  */
-#ifndef _nft_hash_header
-#define _nft_hash_header
+#ifndef _NFT_HASH_H_
+#define _NFT_HASH_H_
 
 typedef struct nft_hash nft_hash;
 
@@ -120,4 +120,4 @@ void  nft_hash_analyze(nft_hash *table);
  */
 unsigned long nft_hash_strhash(const void * key);
 
-#endif // _nft_hash_header
+#endif // _NFT_HASH_H_

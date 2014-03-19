@@ -315,7 +315,7 @@ The subclass destructor must call its parent destructor as the very last step:
     {
 	nft_string * object = nft_string_cast(pointer);
 	if (object) free(object->string);
-	nft_core_destroy(p);
+	nft_core_destroy(pointer);
     }
 
 So, to create an instance of nft_string, we simply invoke the constructor,

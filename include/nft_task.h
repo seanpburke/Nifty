@@ -34,8 +34,8 @@
  *
  ******************************************************************************
  */
-#ifndef nft_task_header
-#define nft_task_header
+#ifndef _NFT_TASK_H_
+#define _NFT_TASK_H_
 
 #include <time.h> // for struct timespec
 
@@ -124,12 +124,12 @@ void nft_task_destroy(nft_core * p);
 int  nft_task_schedule_task(nft_task * task);
 int  nft_task_cancel_task(nft_task * task);
 
-// Declare helper functions nft_task_cast, _handle, _lookup, and _discard.
+// Declare helper functions nft_task_cast, _handle, _lookup, _discard, _list.
 #define nft_task_class nft_core_class ":nft_task"
 NFT_DECLARE_CAST(nft_task)
 NFT_DECLARE_HANDLE(nft_task)
 NFT_DECLARE_LOOKUP(nft_task)
 NFT_DECLARE_DISCARD(nft_task)
+NFT_DECLARE_LIST(nft_task)
 
-#endif // nft_task_header
-
+#endif // _NFT_TASK_H_
