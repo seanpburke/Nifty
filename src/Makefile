@@ -19,9 +19,9 @@ CFLAGS		= -std=gnu99 -Wall -Wno-unused-function -g
 
 # Choose appropriate link libraries.
 #
-#LDLIBS		= -lpthread			# Solaris, Linux, AIX
+LDLIBS		= -lpthread			# Solaris, Linux, AIX
 #LDLIBS		= -lkse				# FreeBSD 5
-LDLIBS		=				# MacOSX, MinGW
+#LDLIBS		=				# MacOSX, MinGW
 
 # Uncomment to use valgrind in the test programs.
 #VALGRIND	= valgrind --leak-check=full

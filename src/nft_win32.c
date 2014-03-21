@@ -546,7 +546,7 @@ main()
     // Join the thread that we launched, and verify the result.
     void * value;
     rc = pthread_join(Thread, &value); assert(rc == 0);
-    assert(57 == (int)value);
+    assert(57 == (long)value);
 
     // TODO: The tests above are very basic.
     // Should add some more severe testing.
