@@ -31,14 +31,7 @@
 #include <string.h>
 
 #include <nft_core.h>
-
-// Declare the handle management API.
-static int          nft_handle_init(void);
-static nft_handle   nft_handle_alloc(nft_core * object);
-static nft_handle * nft_handle_list(const char * class);
-static nft_core *   nft_handle_lookup(nft_handle handle);
-static int          nft_handle_discard(nft_handle handle);
-
+#include <nft_handle.h>
 
 /*******************************************************************************
  *
@@ -78,12 +71,12 @@ nft_core_create(const char * class, size_t size)
 {
     assert(class && size);
     nft_core * object = malloc(size);
-    if (object) {
-	nft_handle handle = nft_handle_alloc(object);
-	if (handle) {
-	    *object = (nft_core) { class, handle, 1, nft_core_destroy };
-	}
-	else { // nft_handle_alloc failed - memory exhausted or too many active handles.
+    if ( object ) {
+	// Initialize the object with a null handle.
+	*object = (nft_core) { class, NULL, nft_core_destroy };
+
+	// Attempt to allocate a handle for this object.
+	if (!nft_handle_alloc(object)) {
 	    free(object);
 	    object = NULL;
 	}
@@ -103,22 +96,15 @@ int
 nft_core_discard(nft_core * p)
 {
     nft_core * object = nft_core_cast(p, nft_core_class);
-    if (object) {
-	assert(object->reference_count > 0);
-
-	// _discard returns the reference_count after decrement.
-	int count = nft_handle_discard(object->handle);
-	if (count == 0) object->destroy(object);
-	if (count >= 0) return 0;
-    }
-    return EINVAL;
+    assert(object);
+    return object ? nft_handle_discard(object) : EINVAL ;
 }
 
 void
 nft_core_destroy(nft_core * p)
 {
     nft_core * object = nft_core_cast(p, nft_core_class);
-    assert(!object || !object->reference_count);
+    assert(object);
     if (object) {
 	// Null the class pointer, to ensure that nft_core_cast
 	// will fail if given a pointer to freed memory.
@@ -133,228 +119,6 @@ nft_core_list(const char * class)
     return nft_handle_list(class);
 }
 
-/*******************************************************************************
- *  Below we implement these functions for handle management:
- *
- *	static void         handle_init(void);
- *	static nft_handle   nft_handle_alloc(nft_core * object);
- *	static nft_handle * nft_handle_list(const char * class);
- *	static nft_core *   nft_handle_lookup(nft_handle handle);
- *	static int          nft_handle_discard(nft_handle handle);
- *
- *  The implementation that is shown here, is a good compromise for
- *  simplicity, efficiency and portability, but there is definitely
- *  room for innovation here. Handle management is isolated within
- *  these five API calls, so that it will be easy to substitute
- *  improved implementations.
- *
- *******************************************************************************
- */
-typedef struct nft_handle_map {
-    // It's not strictly necessary to store handle/object pairs,
-    // because the object contains its handle. But the goal of
-    // of handles is to improve safety, so redundancy is useful.
-    nft_handle handle;
-    nft_core * object;
-} nft_handle_map;
-
-static nft_handle_map * HandleMap     = NULL;
-static unsigned long    NextHandle    = 1;
-
-// HandleMapSize sets the initial size of the HandleMap array.
-// HandleMapMax limits the number of active handles, and thus the
-// number of nft_core instances. If a process reaches this limit,
-// nft_handle_alloc will return NULL, just as if malloc had failed.
-//
-static unsigned         HandleMapSize = (1 << 10); // must be a power of 2
-static unsigned         HandleMapMax  = (1 << 20); // one million handles
-
-// Define a mutex to protect the handle table and object reference counts.
-static pthread_once_t   HandleOnce  = PTHREAD_ONCE_INIT;
-static pthread_mutex_t  HandleMutex = PTHREAD_MUTEX_INITIALIZER;
-
-// This is a private function to Initialize the handle map and other globals.
-// It is only called via pthread_once.
-static void
-handle_once(void)
-{
-    // We initialize the mutex dynamically, in order to be compatible with
-    // nft_win32 pthread emulation, which cannot statically initialize mutexes.
-    int rc = pthread_mutex_init(&HandleMutex, NULL); assert(rc == 0);
-
-    // Allocate the handle map.
-    size_t memsize = HandleMapSize * sizeof(nft_handle_map);
-    if ((HandleMap = malloc(memsize))) memset(HandleMap,0,memsize);
-    assert(HandleMap);
-}
-
-static int
-nft_handle_init(void)
-{
-    // Ensure that the handle table and mutex are initialized.
-    int rc = pthread_once(&HandleOnce, handle_once); assert(rc == 0);
-
-    // Return an error if we cannot initialize the handle subsystem.
-    return HandleMap ? 0 : ENOMEM;
-}
-
-static unsigned
-handle_hash(nft_handle handle, unsigned modulo)
-{
-    // For speed's sake, we do binary modulo arithmetic,
-    // but this assumes that modulo is a power of two.
-    return (unsigned long) handle & (modulo - 1); // handle % modulo;
-}
-
-// Grow the handle map by doubling when it becomes full.
-// Doubling ensures that no hash collisions will occur in the new map.
-static int
-handle_map_enlarge(void)
-{
-    unsigned newsize = HandleMapSize << 1;
-    size_t   memsize = newsize * sizeof(nft_handle_map);
-
-    // Refuse to allocate more than HandleMapMax handles.
-    if (newsize > HandleMapMax) return 0;
-
-    nft_handle_map * newmap = malloc(memsize);
-    if (newmap) {
-	memset(newmap,0,memsize);
-	for (unsigned i = 0; i < HandleMapSize; i++) {
-	    nft_handle handle = HandleMap[i].handle;
-
-	    // Confirm that the handle and object are consistent.
-	    assert(handle == HandleMap[i].object->handle);
-
-	    // Confirm that this is not a hash collision.
-	    assert(newmap[handle_hash(handle, newsize)].handle == NULL);
-	    newmap[handle_hash(handle, newsize)] = HandleMap[handle_hash(handle, HandleMapSize)];
-	}
-	free(HandleMap);
-	HandleMap     = newmap;
-	HandleMapSize = newsize;
-	return 1;
-    }
-    return 0;
-}
-
-static nft_handle
-nft_handle_alloc(nft_core * object)
-{
-    nft_handle handle = NULL;
-
-    // Ensure that the handle table and mutex are initialized.
-    if (nft_handle_init()) return NULL;
-
-    int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-
-rescan: // Scan for the next open slot in the HandleMap
-    for (unsigned i = 0; i < HandleMapSize; i++, NextHandle++) {
-	if (NextHandle) {
-	    unsigned index = handle_hash((nft_handle)NextHandle, HandleMapSize);
-	    if (HandleMap[index].handle == NULL) {
-		handle = (nft_handle) NextHandle++;
-		HandleMap[index] = (nft_handle_map){ handle, object };
-		break;
-	    }
-	}
-    }
-    // If the table is full, and we are able to enlarge it, try again.
-    if (!handle && handle_map_enlarge())
-	goto rescan;
-    rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
-    return handle;
-}
-
-// Look up a handle, atomically incrementing the object reference count.
-static nft_core *
-nft_handle_lookup(nft_handle handle)
-{
-    nft_core * object = NULL;
-
-    // NULL is an invalid handle by definition.
-    if (!handle) return NULL;
-
-    int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-    unsigned   index  = handle_hash(handle, HandleMapSize);
-
-    // The handle is only valid if it matches the handle in the table.
-    if (handle == HandleMap[index].handle) {
-	object =  HandleMap[index].object;
-
-	// Sanity check - Does this handle really refer to this object?
-	assert(handle == object->handle);
-
-	// Lookup always increments the object reference count.
-	object->reference_count++;
-    }
-    rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
-    return object;
-}
-
-// Look up the handle and decrement the object reference count.
-// Deletes the handle if the new reference count is zero.
-// Returns the new reference count, or -1 on stale handles.
-static int
-nft_handle_discard(nft_handle handle)
-{
-    int count = -1;
-
-    // NULL is an invalid handle by definition.
-    if (!handle) return count;
-
-    int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-    unsigned long index = handle_hash(handle, HandleMapSize);
-
-    // Correct code should never attempt to discard a stale handle.
-    assert(handle == HandleMap[index].handle);
-    if    (handle == HandleMap[index].handle)
-    {
-	nft_core * object = HandleMap[index].object;
-
-	// Sanity check - Does this handle really refer to this object?
-	assert(handle == object->handle);
-
-	// Decrement reference count, deleting the handle if zero.
-	if (!(count = --object->reference_count))
-	    HandleMap[index] = (nft_handle_map){ NULL, NULL };
-    }
-    rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
-    return count;
-}
-
-// List all the handles of the given class, for diagnostic purposes.
-// Returns a NULL-terminated list of handles to the caller.
-static nft_handle *
-nft_handle_list(const char * class)
-{
-    nft_handle * handles = NULL;
-
-    // Ensure that the handle table and mutex are initialized.
-    if (nft_handle_init()) return NULL;
-
-    int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-
-    // First, count the number of handles in class.
-    int count = 0;
-    for (unsigned i = 0; i < HandleMapSize; i++)
-	if (nft_core_cast(HandleMap[i].object, class)) count++;
-
-    // Allocate an array to hold the handles, plus a null terminator.
-    if ((handles = malloc((count+1)*sizeof(nft_handle))))
-    {
-	unsigned j = 0;
-	for (unsigned i = 0; i < HandleMapSize; i++)
-	    if (nft_core_cast(HandleMap[i].object, class))
-		handles[j++] = HandleMap[i].handle;
-
-	// Add the terminating NULL handle.
-	assert(j == count);
-	handles[j] = NULL;
-    }
-    rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
-    return handles;
-}
 
 /******************************************************************************/
 /******************************************************************************/
@@ -384,17 +148,20 @@ typedef struct nft_string
 // and pass it to the constructor to set the instance's .class.
 #define nft_string_class nft_core_class ":nft_string"
 
-// This macro expands to the following declarations:
-NFT_DECLARE_WRAPPERS(nft_string,)
-// typedef struct nft_string_h * nft_string_h;
-// nft_string * nft_string_cast(nft_core * p);
-// nft_string_h nft_string_handle(const nft_string * s);
-// nft_string * nft_string_lookup(nft_string_h h);
-// void nft_string_discard(nft_string * s);
-// nft_string_h * nft_string_list(void);
-
-// This macro expands to definitions for the prototypes:
-NFT_DEFINE_WRAPPERS(nft_string,)
+NFT_DECLARE_WRAPPERS(nft_string,static)
+//
+// The macro above expands to the following declarations:
+//
+//   typedef struct nft_string_h * nft_string_h;
+//   static nft_string *   nft_string_cast(nft_core * p);
+//   static nft_string_h   nft_string_handle(const nft_string * s);
+//   static nft_string *   nft_string_lookup(nft_string_h h);
+//   static void           nft_string_discard(nft_string * s);
+//   static nft_string_h * nft_string_list(void);
+//
+// The macro below defines the functions declared above:
+//
+NFT_DEFINE_WRAPPERS(nft_string,static)
 
 // The destructor should take a nft_core * parameter.
 void
@@ -502,17 +269,14 @@ basic_tests()
     nft_core  * p = nft_core_create(nft_core_class, sizeof(nft_core));
     assert(0 == strcmp(p->class, nft_core_class));
     assert(0 != p->handle);
-    assert(1 == p->reference_count);
     assert(nft_core_destroy == p->destroy);
 
     // Test handle lookup/discard.
     nft_handle  h = p->handle;
     nft_core  * q = nft_core_lookup(h);
     assert(q == p);
-    assert(2 == p->reference_count);
     int         s = nft_core_discard(q);
     assert(0 == s);
-    assert(1 == p->reference_count);
 
     // Test the destructor.
     s = nft_core_discard(p);
@@ -521,10 +285,14 @@ basic_tests()
     assert(NULL == r);
 
     // Test handle_map_enlarge
-    int        n = 10000;
+    // int     n = 10000;
+    int        n = 1000;
     nft_core * parray[n];
-    for (int i = 0; i < n; i++)
-	parray[i] = nft_core_create(nft_core_class, sizeof(nft_core));
+    for (int i = 0; i < n; i++) {
+	nft_core * core = nft_core_create(nft_core_class, sizeof(nft_core));
+	assert(NULL != core);
+	parray[i] = core;
+    }
 
     // Confirm that the objects we created are all present.
     nft_handle * handles = nft_core_list(nft_core_class);

@@ -453,7 +453,6 @@ basic_tests(void)
     // First, get our own ref to the pool, so we can check its state.
     nft_pool * pref = nft_pool_lookup(pool);
     assert(pref != NULL);
-    assert(pref->queue.core.reference_count == 2);
 
     // Add a four-second sleep to the pool.
     rc = nft_pool_add(pool, (void(*)(void*)) sleep, (void*) 4);
@@ -461,7 +460,6 @@ basic_tests(void)
     sleep(1);
     assert(pref->num_threads  == 1);
     assert(pref->idle_threads == 0);
-    assert(pref->queue.core.reference_count == 3);
 
     // Spawn a thread that shuts down the queue, but waits for sleep to finish.
     pthread_t thread;
@@ -470,7 +468,6 @@ basic_tests(void)
     sleep(1);
     assert(pref->num_threads  == 1);
     assert(pref->idle_threads == 0);
-    assert(pref->queue.core.reference_count == 3);
 
     // Take advantage of the base-class APIs.
     assert(ESHUTDOWN == nft_queue_state((nft_queue_h) pool));
@@ -480,13 +477,11 @@ basic_tests(void)
     sleep(1);
     assert(pref->num_threads  == 1);
     assert(pref->idle_threads == 0);
-    assert(pref->queue.core.reference_count == 2);
 
     // Wait for sleeper to finish.
     sleep(2);
     assert(pref->num_threads  == 0);
     assert(pref->idle_threads == 0);
-    assert(pref->queue.core.reference_count == 1);
 
     // Discard our handle
     nft_pool_discard(pref);

@@ -2,7 +2,7 @@
 #
 # Build settings. You will need to adjust these depending on your platform.
 #
-CC		= gcc
+CC		= cc
 CPPFLAGS	= -I../include
 
 # By default, use gettimeofday() to get accurate time.
@@ -14,7 +14,7 @@ CPPFLAGS	+= -DUSE_GETTIMEOFDAY
 
 # Select debug or optimized build.
 #
-CFLAGS		= -std=gnu99 -Wall -Wno-unused-function -g
+CFLAGS		= -std=gnu99 -Wall -Wno-unused-function -g  -DNFT_LOCKLESS
 #CFLAGS		= -std=gnu99 -Wall -Wno-unused-function -O2 -DNDEBUG
 
 # Choose appropriate link libraries.
@@ -30,10 +30,10 @@ LDLIBS		= -lpthread			# Solaris, Linux, AIX
 #
 # You should not need to alter the definitions below.
 #
-VERSION = 0.93
+VERSION = 0.94
 LIBDIR	= ../lib
 LIB	= $(LIBDIR)/libnifty.a
-SRCS	= nft_core.c nft_hash.c nft_pool.c nft_queue.c nft_task.c nft_win32.c
+SRCS	= nft_core.c nft_handle.c nft_hash.c nft_pool.c nft_queue.c nft_task.c nft_win32.c
 OBJS	= $(SRCS:.c=.o)
 EXES	= $(SRCS:.c=)
 DISTDIR = Nifty-$(VERSION)
@@ -43,6 +43,7 @@ all:	$(LIB)
 
 test:	$(EXES)
 	$(VALGRIND) ./nft_core
+	$(VALGRIND) ./nft_handle
 	$(VALGRIND) ./nft_queue  < /usr/share/dict/words
 	$(VALGRIND) ./nft_pool
 	$(VALGRIND) ./nft_task
@@ -61,6 +62,9 @@ $(LIB): $(LIBDIR) $(OBJS)
 # Build the unit test programs
 #
 nft_core: nft_core.c ../include/nft_core.h $(LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
+
+nft_handle: nft_handle.c ../include/nft_handle.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
 nft_hash: nft_hash.c ../include/nft_hash.h $(LIB)
