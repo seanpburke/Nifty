@@ -211,7 +211,7 @@ nft_handle_lookup(nft_handle handle)
 	// handle_map_acquire will only increment refcounts that were already positive,
 	// so this result means that we have locked a live object reference.
 	nft_core * object = slot->object;
-	
+
 	// Is this the object that we are looking for?
 	if (handle == object->handle) return object;
 
@@ -320,6 +320,7 @@ handle_hash(nft_handle handle, unsigned modulo)
 
 // Grow the handle map by doubling when it becomes full.
 // Doubling ensures that no hash collisions will occur in the new map.
+// The caller must hold HandleMapMutex.
 static int
 handle_map_enlarge(void)
 {
@@ -332,16 +333,19 @@ handle_map_enlarge(void)
     nft_handle_map * newmap = malloc(memsize);
     if (newmap) {
 	memset(newmap,0,memsize);
-	for (unsigned i = 0; i < HandleMapSize; i++) {
-	    nft_handle handle = HandleMap[i].handle;
 
-	    // Confirm that the handle and object are consistent.
-	    assert(handle == HandleMap[i].object->handle);
+	// Copy all current objects to the new handle map.
+	for (unsigned i = 0; i < HandleMapSize; i++)
+	    if (HandleMap[i].refcount) {
+		nft_handle handle = HandleMap[i].object->handle;
 
-	    // Confirm that this is not a hash collision.
-	    assert(newmap[handle_hash(handle, newsize)].handle == NULL);
-	    newmap[handle_hash(handle, newsize)] = HandleMap[handle_hash(handle, HandleMapSize)];
-	}
+		// Confirm that this is not a hash collision.
+		assert(newmap[handle_hash(handle, newsize)].refcount == 0);
+
+		newmap[handle_hash(handle, newsize)] = HandleMap[handle_hash(handle, HandleMapSize)];
+	    }
+
+	// Replace the old HandleMap with the new map.
 	free(HandleMap);
 	HandleMap     = newmap;
 	HandleMapSize = newsize;
@@ -350,6 +354,8 @@ handle_map_enlarge(void)
     return 0;
 }
 
+// Allocate a new handle for object, storing it in the HandleMap table.
+// Returns the new handle, or NULL on failure.
 nft_handle
 nft_handle_alloc(nft_core * object)
 {
@@ -367,9 +373,9 @@ rescan: // Scan for the next open slot in the HandleMap
     for (unsigned i = 0; i < HandleMapSize; i++, NextHandle++) {
 	if (NextHandle) {
 	    unsigned index = handle_hash((nft_handle)NextHandle, HandleMapSize);
-	    if (HandleMap[index].handle == NULL) {
-		handle = (nft_handle) NextHandle++;
-		HandleMap[index] = (nft_handle_map){ handle, object };
+	    if (HandleMap[index].refcount == 0) {
+		object->handle = handle = (nft_handle) NextHandle++;
+		HandleMap[index] = (nft_handle_map){ 1, object };
 		break;
 	    }
 	}
@@ -391,17 +397,17 @@ nft_handle_lookup(nft_handle handle)
     if (!handle) return NULL;
 
     int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-    unsigned   index  = handle_hash(handle, HandleMapSize);
+    unsigned         index = handle_hash(handle, HandleMapSize);
+    nft_handle_map * slot  = &HandleMap[index];
 
-    // The handle is only valid if it matches the handle in the table.
-    if (handle == HandleMap[index].handle) {
-	object =  HandleMap[index].object;
-
-	// Sanity check - Does this handle really refer to this object?
-	assert(handle == object->handle);
+    // The map slot only contains a valid object if the refcount is positive.
+    // The handle is only valid if it matches the object's handle.
+    if (0      <  slot->refcount &&
+	handle == slot->object->handle) {
+	object =  slot->object;
 
 	// Lookup always increments the object reference count.
-	object->reference_count++;
+	slot->refcount++;
     }
     rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
     return object;
@@ -412,45 +418,40 @@ nft_handle_lookup(nft_handle handle)
 // destroy the object.
 // Returns zero on success, or EINVAL on invalid handles.
 int
-nft_handle_discard(nft_handle handle)
+nft_handle_discard(nft_core * object)
 {
-    // NULL is an invalid handle by definition.
-    if (!handle) return EINVAL;
-
-    nft_core    * object  = NULL;
-    int           destroy = 0;
-    
+    int result  = EINVAL;
+    int destroy = 0;
     int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
-    unsigned long index = handle_hash(handle, HandleMapSize);
 
+    unsigned         index = handle_hash(object->handle, HandleMapSize);
+    nft_handle_map * slot  = &HandleMap[index];
+
+    // Unlike nft_handle_lookup, this should only be called on live objects.
     // Correct code should never attempt to discard a stale handle.
-    assert(handle == HandleMap[index].handle);
-    if    (handle == HandleMap[index].handle)
+    assert(slot->object == object);
+    assert(slot->refcount > 0);
+
+    if (slot->refcount  > 0 && slot->object == object)
     {
-	object = HandleMap[index].object;
-
-	// Sanity check - Does this handle really refer to this object?
-	assert(handle == object->handle);
-
 	// Decrement reference count, deleting the handle if zero.
-	if (!(count = --object->reference_count))
-	{
-	    HandleMap[index] = (nft_handle_map){ NULL, NULL };
+	if (--slot->refcount == 0) {
+	    *slot = (nft_handle_map){ 0, NULL };
 
 	    // We hold the sole reference to object, so we must destroy
 	    // the object, but only after we have released the mutex.
 	    destroy = 1;
 	}
+	result = 0; // Success.
     }
     rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
     if (destroy) object->destroy(object);
-
-    return object ? 0 : EINVAL ;
+    return result;
 }
 
 // List all the handles of the given class, for diagnostic purposes.
 // Returns a NULL-terminated list of handles to the caller.
-static nft_handle *
+nft_handle *
 nft_handle_list(const char * class)
 {
     nft_handle * handles = NULL;
@@ -463,15 +464,17 @@ nft_handle_list(const char * class)
     // First, count the number of handles in class.
     int count = 0;
     for (unsigned i = 0; i < HandleMapSize; i++)
-	if (nft_core_cast(HandleMap[i].object, class)) count++;
+	if (HandleMap[i].refcount > 0 &&
+	    nft_core_cast(HandleMap[i].object, class)) count++;
 
     // Allocate an array to hold the handles, plus a null terminator.
     if ((handles = malloc((count+1)*sizeof(nft_handle))))
     {
 	unsigned j = 0;
 	for (unsigned i = 0; i < HandleMapSize; i++)
-	    if (nft_core_cast(HandleMap[i].object, class))
-		handles[j++] = HandleMap[i].handle;
+	    if (HandleMap[i].refcount > 0 &&
+		nft_core_cast(HandleMap[i].object, class))
+		handles[j++] = HandleMap[i].object->handle;
 
 	// Add the terminating NULL handle.
 	assert(j == count);

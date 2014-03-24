@@ -14,8 +14,11 @@ CPPFLAGS	+= -DUSE_GETTIMEOFDAY
 
 # Select debug or optimized build.
 #
-CFLAGS		= -std=gnu99 -Wall -Wno-unused-function -g  -DNFT_LOCKLESS
+CFLAGS		= -std=gnu99 -Wall -Wno-unused-function -g
 #CFLAGS		= -std=gnu99 -Wall -Wno-unused-function -O2 -DNDEBUG
+
+# Uncomment to use the GCC atomic builtins in nft_handle.c
+CFLAGS += -DNFT_LOCKLESS
 
 # Choose appropriate link libraries.
 #
@@ -42,8 +45,8 @@ DIST	= ../../Nifty-$(VERSION).tgz
 all:	$(LIB)
 
 test:	$(EXES)
-	$(VALGRIND) ./nft_core
 	$(VALGRIND) ./nft_handle
+	$(VALGRIND) ./nft_core
 	$(VALGRIND) ./nft_queue  < /usr/share/dict/words
 	$(VALGRIND) ./nft_pool
 	$(VALGRIND) ./nft_task
