@@ -113,10 +113,48 @@ nft_core_destroy(nft_core * p)
     }
 }
 
+// apply_enlist is passed to nft_handle_apply, which calls it on every nft_core object.
+// If the object is in the given class, the object's handle is added to the list.
+//
+struct handle_list {
+    unsigned     next;
+    unsigned     size;
+    nft_handle * list;
+};
+static void
+apply_enlist(nft_core * object, const char * class, void * argument)
+{
+    struct handle_list * hlp = argument;
+
+    if (nft_core_cast(object, class))
+    {
+	// Have we reached the limit of our current list?
+	if (hlp->next == hlp->size) {
+	    // Allocate a list of twice the size, plus one more for the terminator.
+	    nft_handle * newlist = realloc(hlp->list, (2*hlp->size + 1) * sizeof(nft_handle));
+	    if (newlist) {
+		hlp->list  = newlist;
+		hlp->size *= 2;
+	    }
+	}
+	if (hlp->next < hlp->size) {
+	    hlp->list[hlp->next++] = object->handle;
+	}
+    }
+}
+
+// Returns
 nft_handle *
 nft_core_list(const char * class)
 {
-    return nft_handle_list(class);
+    int          size = 126;
+    nft_handle * list = malloc((size + 1) * sizeof(nft_handle));
+    struct handle_list hl = (struct handle_list){ 0, size, list };
+    if (hl.list) {
+	nft_handle_apply(apply_enlist, class, &hl);
+	hl.list[hl.next] = NULL;
+    }
+    return hl.list;
 }
 
 
@@ -134,136 +172,12 @@ nft_core_list(const char * class)
 #include <assert.h>
 #include <stdio.h>
 
-// Here we demonstrate how to create a subclass derived from nft_core.
-// This subclass provides a simple reference-counted string class.
-// The README.txt file provides a detailed explanation of this.
+#include <nft_string.h>
+
+// Test (and demonstrate) use of the constructor and helper functions.
 //
-typedef struct nft_string
-{
-    nft_core core;
-    char   * string;
-} nft_string;
-
-// You must define a macro for the subclass's class name,
-// and pass it to the constructor to set the instance's .class.
-#define nft_string_class nft_core_class ":nft_string"
-
-NFT_DECLARE_WRAPPERS(nft_string,static)
-//
-// The macro above expands to the following declarations:
-//
-//   typedef struct nft_string_h * nft_string_h;
-//   static nft_string *   nft_string_cast(nft_core * p);
-//   static nft_string_h   nft_string_handle(const nft_string * s);
-//   static nft_string *   nft_string_lookup(nft_string_h h);
-//   static void           nft_string_discard(nft_string * s);
-//   static nft_string_h * nft_string_list(void);
-//
-// The macro below defines the functions declared above:
-//
-NFT_DEFINE_WRAPPERS(nft_string,static)
-
-// The destructor should take a nft_core * parameter.
-void
-nft_string_destroy(nft_core * p)
-{
-    nft_string * object = nft_string_cast(p);
-
-    // The _cast function will return NULL if p is not a nft_string.
-    if (object) free(object->string);
-
-    // Remember to invoke the base-class destroyer last of all.
-    nft_core_destroy(p);
-}
-
-// The constructor should accept class and size parameters,
-// so that further subclasses can be derived from this subclass.
-nft_string *
-nft_string_create(const char * class, size_t size, const char * string)
-{
-    nft_string  * object = nft_string_cast(nft_core_create(class, size));
-    object->core.destroy = nft_string_destroy;
-    object->string = strdup(string);
-    return object;
-}
-
-// This function demonstrates the use of nft_string_lookup/_discard,
-// to implement your class's accessor methods.
-void
-nft_string_print(nft_string_h handle)
-{
-    nft_string * object = nft_string_lookup(handle);
-    if (object) {
-	fprintf(stderr, "string[%p] => '%s'\n", object->core.handle, object->string);
-	nft_string_discard(object);
-    }
-}
-
-// The definitions above create a complete subclass of nft_core.
-// This function demonstrates use of the constructor and helper functions.
-//
-static void
-nft_string_tests()
-{
-    // Create the original instance, and save its handle in the variable h.
-    nft_string * o = nft_string_create(nft_string_class, sizeof(nft_string), "my string");
-    nft_string_h h = nft_string_handle(o);
-
-    // Look up the handle to obtain a second reference to the original instance.
-    nft_string * r = nft_string_lookup(h);
-
-    // The lookup operation incremented the reference count,
-    // so we can safely use r to refer to the original object.
-    assert(!strcmp(r->string, "my string"));
-
-    // Discard the reference we obtained via lookup.
-    nft_string_discard(r);
-
-    // Now discard the original reference. This will decrement its reference
-    // count to zero, causing the object to be destroyed.
-    nft_string_discard(o);
-
-    // The handle has been deleted, so lookup will now fail.
-    r = nft_string_lookup(h);
-    assert(r == NULL);
-
-    // We can safely call nft_string_print, even though the object
-    // has been freed, because stale handles are ignored.
-    nft_string_print(h);
-
-    // nft_string_list returns an array with the handle of every nft_string instance.
-    // It is created automatically by the DEFINE_HELPERS macro, for every Nifty class.
-    // To demonstrate how this works, we first create ten nft_string instances.
-    const char * words[] = { "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", NULL };
-    for (int i = 0; words[i] ; i++ )
-	nft_string_create(nft_string_class, sizeof(nft_string), words[i]);
-
-    // Get an array of handles for all current nft_string instances.
-    // Even if there are no live strings, you will still get an empty array,
-    // but nft_string_list will return NULL if memory is exhausted.
-    nft_string_h * handles = nft_string_list();
-    if (handles) {
-	// Iterate over the array, which is terminated by a NULL handle.
-	for (int i = 0; handles[i]; i++) nft_string_print(handles[i]);
-
-	// In order to free these nft_strings, we must lookup the handle
-	// and discard the resulting reference twice.
-	for (int i = 0; handles[i]; i++) {
-	    nft_string * string = nft_string_lookup(handles[i]);
-	    if (string) {
-		int error;
-		error = nft_string_discard(string); assert(0 == error);
-		error = nft_string_discard(string); assert(0 == error);
-	    }
-	}
-	// Don't forget to free the array of handles.
-	free(handles);
-    }
-}
-
-
-static void
-basic_tests()
+int
+main(int argc, char *argv[])
 {
     // Test the constructor.
     nft_core  * p = nft_core_create(nft_core_class, sizeof(nft_core));
@@ -311,20 +225,9 @@ basic_tests()
     while (handles[i]) i++;
     assert(i == 0);
     free(handles);
-}
-
-int
-main(int argc, char *argv[])
-{
-    // First, perform the basic tests.
-    basic_tests();
-
-    // Now, test nft_string, which uses nft_core as a base class.
-    nft_string_tests();
 
     printf("nft_core: All tests passed.\n");
     exit(0);
 }
-
 
 #endif // MAIN

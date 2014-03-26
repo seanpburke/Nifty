@@ -725,6 +725,8 @@ nft_queue_state( nft_queue_h h)
 #include <ctype.h>
 #include <stdio.h>
 
+#include <nft_string.h>
+
 /* Strings are used for the simple tests.
  */
 static char * Strings[] =
@@ -757,19 +759,25 @@ pthread_t	input_thread  = 0;
 pthread_t	output_thread = 0;
 pthread_t	worker_threads[NUM_WORKERS];
 
-
 /* This is spawned as a single thread that reads lines from
- * standard input, and passes them to the raw message queue.
+ * standard input, and passes them to the message queue.
  */
 static void *
 poll_input(void * arg)
 {
     nft_queue_h q  = arg;
     long        rc = -1;
-    while (1) {
-	char * buff = malloc(BUFFSZ); assert(buff);
-	if (fgets(buff, BUFFSZ, stdin)  == NULL) break;
-	if ((rc = nft_queue_add(q, buff))) break;
+    char        buff[BUFFSZ];
+    while (fgets(buff, sizeof(buff), stdin))
+    {
+	// Newly-created objects have a reference count of one,
+	// so we could safely place this object on the queue.
+	// The only reason for placing its handle into the queue
+	// instead, is to add stress to the handle subsystem,
+	// by making the workers call _lookup/_discard.
+	//
+	nft_string * object = nft_string_new(buff);
+	if ((rc = nft_queue_add(q, object->core.handle))) break;
 	countin++;
     }
     fputs("input thread done\n", stderr);
@@ -783,11 +791,15 @@ poll_input(void * arg)
 static void *
 worker_thread(void * index)
 {
-    long    rc = -1;
-    char  * msg;
-    while ((msg = nft_queue_pop(input_Q))) {
-	for (char * s = msg; (*s = toupper(*s));  s++);
-	if ((rc = nft_queue_add(output_Q, msg))) break;
+    long         rc = -1;
+    nft_string_h handle;
+    while ((handle = nft_queue_pop(input_Q))) {
+	nft_string * object = nft_string_lookup(handle);
+	if (object) {
+	    for (char * s = object->string; (*s = toupper(*s));  s++);
+	    nft_string_discard(object);
+	}
+	if ((rc = nft_queue_add(output_Q, handle))) break;
     }
     fprintf(stderr, "worker_thread[%ld] done\n", (long) index);
     return (void*) rc;
@@ -799,12 +811,19 @@ worker_thread(void * index)
 static void *
 poll_output(void * arg)
 {
-    nft_queue_h q  = arg;
-    long        rc = -1;
-    char      * msg;
+    nft_queue_h  q  = arg;
+    long         rc = -1;
+    nft_string_h handle;
+
     // Illustrate use of the _pop_wait_ex call, to pop items until the queue is shut down.
-    while (!(rc = nft_queue_pop_wait_ex(q, -1, (void**) &msg))) {
-	free(msg);
+    while (!(rc = nft_queue_pop_wait_ex(q, -1, (void**) &handle))) {
+	nft_string * object = nft_string_lookup(handle);
+	if (object) {
+	    // We call discard twice - first to balance the _lookup we just did,
+	    // and again to discard the original reference created by poll_input().
+	    nft_string_discard(object);
+	    nft_string_discard(object);
+	}
 	countout++;
     }
     assert(ESHUTDOWN == rc);

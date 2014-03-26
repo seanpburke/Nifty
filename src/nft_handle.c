@@ -47,6 +47,8 @@ static pthread_once_t   HandleOnce    = PTHREAD_ONCE_INIT;
 
 static void handle_once(void);
 
+// Initialize the nft_handle subsystem.
+// Returns zero on success, or ENOMEM on failure.
 int
 nft_handle_init(void)
 {
@@ -124,7 +126,7 @@ counter_add(int * counter, int operand)
 
 // Attempt to increment a positive (live) reference count.
 static int
-handle_map_acquire(nft_handle_map * slot)
+handle_map_increment(nft_handle_map * slot)
 {
     // counter_add returns the prior count, so a positive result means
     // that the slot was live, and we have successfully incremented it.
@@ -135,7 +137,7 @@ handle_map_acquire(nft_handle_map * slot)
 // It is possible that the decrement will zero the count,
 // in which case the slot is freed and the object destroyed.
 static void
-handle_map_release(nft_handle_map * slot)
+handle_map_decrement(nft_handle_map * slot)
 {
     if (counter_add(&slot->refcount, -1) == 1)
     {
@@ -206,7 +208,7 @@ nft_handle_lookup(nft_handle handle)
     unsigned         index = handle_hash(handle, HandleMapSize);
     nft_handle_map * slot  = &HandleMap[index];
 
-    if (handle_map_acquire(slot) > 0)
+    if (handle_map_increment(slot) > 0)
     {
 	// handle_map_acquire will only increment refcounts that were already positive,
 	// so this result means that we have locked a live object reference.
@@ -216,7 +218,7 @@ nft_handle_lookup(nft_handle handle)
 	if (handle == object->handle) return object;
 
 	// This object has a different handle, so we must decrement our increment.
-	handle_map_release(slot);
+	handle_map_decrement(slot);
     }
     return NULL;
 }
@@ -236,43 +238,29 @@ nft_handle_discard(nft_core * object)
     if (slot->object != object || slot->refcount <= 0) return EINVAL;
 
     // Decrement the counter, and destroy the object if necessary.
-    handle_map_release(slot);
+    handle_map_decrement(slot);
     return 0;
 }
 
-// List all the handles of the given class, for diagnostic purposes.
-// Returns a NULL-terminated list of handles to the caller.
-nft_handle *
-nft_handle_list(const char * class)
+void
+nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char * class, void * argument)
 {
-    nft_handle * handles = NULL;
-    nft_core   * object;
-
     // Ensure that the handle table and mutex are initialized.
-    if (nft_handle_init()) return NULL;
+    if (nft_handle_init()) return;
 
-    // First, count the number of handles in class.
-    int count = 0;
-    for (unsigned i = 0; i < HandleMapSize; i++)
-	if ((object = HandleMap[i].object  ) &&
-	    (0      < HandleMap[i].refcount) &&
-	    nft_core_cast(object, class)      )
-	    count++;
-
-    // Allocate an array to hold the handles, plus a null terminator.
-    if ((handles = malloc((count+1)*sizeof(nft_handle))))
+    for(unsigned i = 0; i < HandleMapSize; i++)
     {
-	// It is possible that handles will have been added or cleared,
-	// so the final list may be shorter, or there may be too many to fit.
-	unsigned j = 0;
-	for (unsigned i = 0; i < HandleMapSize && j < count ; i++)
-	    if ((object = HandleMap[i].object  ) &&
-		(0      < HandleMap[i].refcount) &&
-		nft_core_cast(object, class)      )
-		handles[j++] = object->handle;
-	handles[j] = NULL;
+	nft_handle_map * slot = &HandleMap[i];
+	if (handle_map_increment(slot) > 0)
+	{
+	    nft_core * object = slot->object;
+
+	    // Call function, passing object, class and argument.
+	    function(object, class, argument);
+
+	    handle_map_decrement(slot);
+	}
     }
-    return handles;
 }
 
 #else  // if not defined NFT_LOCKLESS
@@ -449,39 +437,23 @@ nft_handle_discard(nft_core * object)
     return result;
 }
 
-// List all the handles of the given class, for diagnostic purposes.
-// Returns a NULL-terminated list of handles to the caller.
-nft_handle *
-nft_handle_list(const char * class)
+void
+nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char * class, void * argument)
 {
-    nft_handle * handles = NULL;
-
     // Ensure that the handle table and mutex are initialized.
-    if (nft_handle_init()) return NULL;
+    if (nft_handle_init()) return;
 
     int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
 
-    // First, count the number of handles in class.
-    int count = 0;
     for (unsigned i = 0; i < HandleMapSize; i++)
-	if (HandleMap[i].refcount > 0 &&
-	    nft_core_cast(HandleMap[i].object, class)) count++;
-
-    // Allocate an array to hold the handles, plus a null terminator.
-    if ((handles = malloc((count+1)*sizeof(nft_handle))))
     {
-	unsigned j = 0;
-	for (unsigned i = 0; i < HandleMapSize; i++)
-	    if (HandleMap[i].refcount > 0 &&
-		nft_core_cast(HandleMap[i].object, class))
-		handles[j++] = HandleMap[i].object->handle;
-
-	// Add the terminating NULL handle.
-	assert(j == count);
-	handles[j] = NULL;
+	nft_handle_map * slot = &HandleMap[i];
+	if (slot->refcount > 0)	{
+	    // Call function, passing object and argument.
+	    function(slot->object, class, argument);
+	}
     }
     rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
-    return handles;
 }
 
 #endif // NFT_LOCKLESS

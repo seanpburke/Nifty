@@ -30,6 +30,6 @@ int          nft_handle_init(void);
 nft_handle   nft_handle_alloc(nft_core * object);
 nft_core   * nft_handle_lookup(nft_handle handle);
 int          nft_handle_discard(nft_core * object);
-nft_handle * nft_handle_list(const char * class);
+void         nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char * class, void * argument);
 
 #endif // _NFT_HANDLE_H_

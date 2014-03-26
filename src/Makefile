@@ -10,15 +10,15 @@ CPPFLAGS	= -I../include
 #
 CPPFLAGS	+= -DUSE_GETTIMEOFDAY
 
-# CPPFLAGS	+= -D_ALL_SOURCE		# Uncomment for Windows SFU builds.
+# CPPFLAGS	+= -DNFT_LOCKLESS	# Uncomment to use the GCC atomic builtins in nft_handle.c
+
+# CPPFLAGS	+= -D_ALL_SOURCE	# Uncomment for Windows SFU builds.
+
 
 # Select debug or optimized build.
 #
 CFLAGS		= -std=gnu99 -Wall -Wno-unused-function -g
 #CFLAGS		= -std=gnu99 -Wall -Wno-unused-function -O2 -DNDEBUG
-
-# Uncomment to use the GCC atomic builtins in nft_handle.c
-CFLAGS += -DNFT_LOCKLESS
 
 # Choose appropriate link libraries.
 #
@@ -36,7 +36,7 @@ LDLIBS		= -lpthread			# Solaris, Linux, AIX
 VERSION = 0.94
 LIBDIR	= ../lib
 LIB	= $(LIBDIR)/libnifty.a
-SRCS	= nft_core.c nft_handle.c nft_hash.c nft_pool.c nft_queue.c nft_task.c nft_win32.c
+SRCS	= nft_core.c nft_handle.c nft_hash.c nft_pool.c nft_queue.c nft_string.c nft_task.c nft_win32.c
 OBJS	= $(SRCS:.c=.o)
 EXES	= $(SRCS:.c=)
 DISTDIR = Nifty-$(VERSION)
@@ -49,6 +49,7 @@ test:	$(EXES)
 	$(VALGRIND) ./nft_core
 	$(VALGRIND) ./nft_queue  < /usr/share/dict/words
 	$(VALGRIND) ./nft_pool
+	$(VALGRIND) ./nft_string
 	$(VALGRIND) ./nft_task
 	$(VALGRIND) ./nft_hash   < /usr/share/dict/words
 	$(VALGRIND) ./nft_win32
@@ -77,6 +78,9 @@ nft_pool: nft_pool.c ../include/nft_pool.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
 nft_queue: nft_queue.c ../include/nft_queue.h $(LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
+
+nft_string: nft_string.c ../include/nft_string.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
 nft_task: nft_task.c ../include/nft_task.h $(LIB)

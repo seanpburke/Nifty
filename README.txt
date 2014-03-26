@@ -37,6 +37,10 @@ below.
 The Nifty packages can be built on WIN32. For more information,
 refer to the section "WIN32 Notes" below.
 
+This project is hosted at SoureForge:
+
+  http://sourceforge.net/projects/libnifty/
+
 If you have questions or contributions, send them to sean@xenadyne.com.
 -SEan Burke
 
