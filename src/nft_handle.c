@@ -59,212 +59,7 @@ nft_handle_init(void)
     return HandleMap ? 0 : ENOMEM;
 }
 
-#ifdef NFT_LOCKLESS
-/*******************************************************************************
- *  Lockless implementation of the nft_handle API using GCC atomic builtins.
- *
- *	void         nft_handle_init(void);
- *	nft_handle   nft_handle_alloc(nft_core * object);
- *	nft_core   * nft_handle_lookup(nft_handle handle);
- *	int          nft_handle_discard(nft_handle handle);
- *	nft_handle * nft_handle_list(const char * class);
- *
- *  The implementation below uses GCC builtin atomic operations to implement
- *  lockless management of the handle table. It is experimental, and only
- *  enabled when compiling with -D NFT_LOCKLESS.
- *
- *  Below, there is an alternative implementation of the nft_handle APIs,
- *  using conventional POSIX pthread locking.
- *
- *******************************************************************************
- */
-
-// This is a private function to Initialize the handle map and other globals.
-// It is only called via pthread_once.
-static void
-handle_once(void)
-{
-    // Allocate the handle map.
-    HandleMapSize  = HandleMapSize < HandleMapMax ? HandleMapSize : HandleMapMax ;
-    size_t memsize = HandleMapSize * sizeof(nft_handle_map);
-    if ((HandleMap = malloc(memsize)))
-	for (int i = 0; i < HandleMapSize; i++)
-	    HandleMap[i] = (nft_handle_map){ -1, NULL };
-}
-
-// Return a new, unique handle.
-static nft_handle
-handle_next(void)
-{
-    // We will increment this counter to generate a sequence of unique handles.
-    static unsigned long NextHandle = 1;
-
-    // Use gcc atomic builtin to increment NextHandle, so that no mutex is needed.
-    nft_handle   handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
-
-    // Since NULL is an invalid handle, increment once more in that case.
-    if (!handle) handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
-
-    return handle;
-}
-
-// Increment or decrement a positive reference count,
-// returning the prior value of the reference count.
-// Counters that are zero or negative, are not modified.
-static int
-counter_add(int * counter, int operand)
-{
-    // To ensure that we do not modify a zero count, we must use compare_and_swap.
-    int prior = *counter;
-    int count;
-    while ((count = prior) > 0) {
-	prior = __sync_val_compare_and_swap(counter, count, count + operand);
-	if (prior == count) break;
-    }
-    return prior;
-}
-
-// Attempt to increment a positive (live) reference count.
-static int
-handle_map_increment(nft_handle_map * slot)
-{
-    // counter_add returns the prior count, so a positive result means
-    // that the slot was live, and we have successfully incremented it.
-    return (counter_add(&slot->refcount, 1) > 0);
-}
-
-// Attempt to decrement a positive (live) reference count.
-// It is possible that the decrement will zero the count,
-// in which case the slot is freed and the object destroyed.
-static void
-handle_map_decrement(nft_handle_map * slot)
-{
-    if (counter_add(&slot->refcount, -1) == 1)
-    {
-	nft_core * object = slot->object;
-
-	// counter_add returns the prior count. Since it has returned 1,
-	// the count is now zero, and no other thread should manipulate
-	// this slot in any way. We are responsible to free the slot.
-	// Once we decrement the count to -1, the slot becomes available
-	// to handle_map_alloc().
-	//
-	assert(0 == slot->refcount);
-	slot->object = NULL;
-
-	// Free the slot
-	int rc = __sync_bool_compare_and_swap (&slot->refcount,  0, -1);
-	assert(rc);
-
-	// We hold the sole reference to object. Invoke the object's destroy method.
-	object->destroy(object);
-    }
-}
-
-// Given a handle, compute the index of this handle's map table slot.
-static unsigned
-handle_hash(nft_handle handle, unsigned modulo)
-{
-    // For speed's sake, we do binary modulo arithmetic,
-    // but this assumes that modulo is a power of two.
-    return (unsigned long) handle & (modulo - 1); // handle % modulo;
-}
-
-// Given a nft_core object, allocate a handle and add it to the HandleMap.
-nft_handle
-nft_handle_alloc(nft_core * object)
-{
-    // Ensure that the handle table and mutex are initialized.
-    if (nft_handle_init()) return NULL;
-
-    // Scan for the next open slot in the HandleMap.
-    for (unsigned n = 0; n < HandleMapSize; n++)
-    {
-	// Allocate a fresh unique handle and try again.
-	nft_handle       handle = handle_next();
-	unsigned         index  = handle_hash(handle, HandleMapSize);
-	nft_handle_map * slot   = &HandleMap[index];
-
-	// If this map slot is not in use, allocate it to this handle.
-	// Free slots have a reference count -1, and slots with zero are "busy".
-	if (__sync_bool_compare_and_swap (&slot->refcount, -1, 0)) {
-	    object->handle = handle;
-	    slot->object   = object;
-	    __sync_bool_compare_and_swap (&slot->refcount,  0, 1);
-	    return handle;
-	}
-    }
-    // If the HandleMap table is full, we fail.
-    return NULL;
-}
-
-// Look up a handle, atomically incrementing the object reference count.
-nft_core *
-nft_handle_lookup(nft_handle handle)
-{
-    if (!handle) return NULL; // NULL is an invalid handle by definition.
-
-    // Compute our index into the HandleMap table.
-    unsigned         index = handle_hash(handle, HandleMapSize);
-    nft_handle_map * slot  = &HandleMap[index];
-
-    if (handle_map_increment(slot) > 0)
-    {
-	// handle_map_acquire will only increment refcounts that were already positive,
-	// so this result means that we have locked a live object reference.
-	nft_core * object = slot->object;
-
-	// Is this the object that we are looking for?
-	if (handle == object->handle) return object;
-
-	// This object has a different handle, so we must decrement our increment.
-	handle_map_decrement(slot);
-    }
-    return NULL;
-}
-
-// Decrement the object's reference count. If the new reference
-// count is zero, free the map slot and destroy the object.
-// Returns zero on success, or EINVAL on invalid handles.
-int
-nft_handle_discard(nft_core * object)
-{
-    unsigned         index = handle_hash(object->handle, HandleMapSize);
-    nft_handle_map * slot  = &HandleMap[index];
-
-    // Unlike nft_handle_lookup, this should only be called on live objects.
-    assert(slot->object == object);
-    assert(slot->refcount > 0);
-    if (slot->object != object || slot->refcount <= 0) return EINVAL;
-
-    // Decrement the counter, and destroy the object if necessary.
-    handle_map_decrement(slot);
-    return 0;
-}
-
-void
-nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char * class, void * argument)
-{
-    // Ensure that the handle table and mutex are initialized.
-    if (nft_handle_init()) return;
-
-    for(unsigned i = 0; i < HandleMapSize; i++)
-    {
-	nft_handle_map * slot = &HandleMap[i];
-	if (handle_map_increment(slot) > 0)
-	{
-	    nft_core * object = slot->object;
-
-	    // Call function, passing object, class and argument.
-	    function(object, class, argument);
-
-	    handle_map_decrement(slot);
-	}
-    }
-}
-
-#else  // if not defined NFT_LOCKLESS
-
+#ifndef NFT_LOCKLESS
 /*******************************************************************************
  *  POSIX portable implementation of the nft_handle APIs using mutexes.
  *
@@ -274,8 +69,8 @@ nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char 
  *	int          nft_handle_discard(nft_handle handle);
  *	nft_handle * nft_handle_list(const char * class);
  *
- *  The implementation that is shown here, is a good compromise for
- *  simplicity, efficiency and portability.
+ *  The mutex-locked handle map that is implemented here,
+ *  is a good compromise for simplicity, efficiency and portability.
  *
  *******************************************************************************
  */
@@ -369,8 +164,8 @@ rescan: // Scan for the next open slot in the HandleMap
 	}
     }
     // If the table is full, and we are able to enlarge it, try again.
-    if (!handle && handle_map_enlarge())
-	goto rescan;
+    if (!handle && handle_map_enlarge()) goto rescan;
+
     rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
     return handle;
 }
@@ -454,6 +249,320 @@ nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char 
 	}
     }
     rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
+}
+
+#else  // NFT_LOCKLESS defined
+/*******************************************************************************
+ *  Lock-free implementation of the nft_handle API using GCC atomic builtins.
+ *
+ *	void         nft_handle_init(void);
+ *	nft_handle   nft_handle_alloc(nft_core * object);
+ *	nft_core   * nft_handle_lookup(nft_handle handle);
+ *	int          nft_handle_discard(nft_handle handle);
+ *	nft_handle * nft_handle_list(const char * class);
+ *
+ *  The implementation below uses GCC builtin atomic operations to implement
+ *  lockless management of the handle table. It is experimental, and only
+ *  enabled when compiling with -DNFT_LOCKLESS.
+ *
+ *  There is no good reason to use this version for most applications.
+ *  The default mutex-locked handle map is very good, because the mutex
+ *  is held very briefly. You have to create a micro-benchmark to show
+ *  the performance advantage.
+ *
+ *  Further, this is not lock-free, if the map is allowed to be enlarged.
+ *  Unless you set HandleMapSize equal to HandleMapMax, we protect the map
+ *  with a Read/Write lock. All operations except enlargement are done with
+ *  a Read lock, which does allow concurrency, but also adds overhead.
+ *
+ *  To obtain any performance gain, you must operate purely lock-free,
+ *  but the price is that the handle map cannot be enlarged. If you set
+ *  HandleMapSize = HandleMapMax, the read/write lock will be skipped,
+ *  but in that case, if the map should fill, object creation will fail,
+ *  just as if memory were exhausted. If anyone knows a pure lock-free
+ *  design that also permits the map to be enlarged, I would be pleased
+ *  to learn about it.
+ *
+ *******************************************************************************
+ */
+static pthread_rwlock_t  HandleRWlock = PTHREAD_RWLOCK_INITIALIZER;
+
+static int
+handle_rdlock(void) {
+    if (HandleMapSize < HandleMapMax) {
+	int rc = pthread_rwlock_rdlock(&HandleRWlock); assert(0 == rc);
+	return !rc ? 1 : 0 ;
+    }
+    return 0;
+}
+static int
+handle_wrlock(void) {
+    int rc = pthread_rwlock_wrlock(&HandleRWlock); assert(0 == rc);
+    return !rc ? 1 : 0 ;
+}
+static int
+handle_unlock(void) {
+    int rc = pthread_rwlock_unlock(&HandleRWlock); assert(0 == rc);
+    return !rc ? 1 : 0 ;
+}
+
+// This is a private function to Initialize the handle map and other globals.
+// It is only called via pthread_once.
+static void
+handle_once(void)
+{
+    int rc = pthread_rwlock_init(&HandleRWlock, NULL); assert(0 == rc);
+
+    // Allocate the handle map.
+    HandleMapSize  = HandleMapSize < HandleMapMax ? HandleMapSize : HandleMapMax ;
+    size_t memsize = HandleMapSize * sizeof(nft_handle_map);
+    if ((HandleMap = malloc(memsize)))
+	for (int i = 0; i < HandleMapSize; i++)
+	    HandleMap[i] = (nft_handle_map){ -1, NULL };
+}
+
+
+// Return a new, unique handle.
+static nft_handle
+handle_next(void)
+{
+    // We will increment this counter to generate a sequence of unique handles.
+    static unsigned long NextHandle = 1;
+
+    // Use gcc atomic builtin to increment NextHandle, so that no mutex is needed.
+    nft_handle   handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
+
+    // Since NULL is an invalid handle, increment once more in that case.
+    if (!handle) handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
+
+    return handle;
+}
+
+// Increment or decrement a positive reference count,
+// returning the prior value of the reference count.
+// Counters that are zero or negative, are not modified.
+static int
+counter_add(int * counter, int operand)
+{
+    // To ensure that we do not modify a zero count, we must use compare_and_swap.
+    int prior = *counter;
+    int count;
+    while ((count = prior) > 0) {
+	prior = __sync_val_compare_and_swap(counter, count, count + operand);
+	if (prior == count) break;
+    }
+    return prior;
+}
+
+// Attempt to increment a positive (live) reference count.
+static int
+handle_map_increment(nft_handle_map * slot)
+{
+    // counter_add returns the prior count, so a positive result means
+    // that the slot was live, and we have successfully incremented it.
+    return (counter_add(&slot->refcount, 1) > 0);
+}
+
+// Attempt to decrement a positive (live) reference count.
+// It is possible that the decrement will zero the count,
+// in which case the slot is freed and the object destroyed.
+static void
+handle_map_decrement(nft_handle_map * slot)
+{
+    if (counter_add(&slot->refcount, -1) == 1)
+    {
+	nft_core * object = slot->object;
+
+	// counter_add returns the prior count. Since it has returned 1,
+	// the count is now zero, and no other thread should manipulate
+	// this slot in any way. We are responsible to free the slot.
+	// Once we decrement the count to -1, the slot becomes available
+	// to handle_map_alloc().
+	//
+	assert(0 == slot->refcount);
+	slot->object = NULL;
+
+	// Free the slot
+	int rc = __sync_bool_compare_and_swap (&slot->refcount,  0, -1);
+	assert(rc);
+
+	// We hold the sole reference to object. Invoke the object's destroy method.
+	object->destroy(object);
+    }
+}
+
+// Given a handle, compute the index of this handle's map table slot.
+static unsigned
+handle_hash(nft_handle handle, unsigned modulo)
+{
+    // For speed's sake, we do binary modulo arithmetic,
+    // but this assumes that modulo is a power of two.
+    return (unsigned long) handle & (modulo - 1); // handle % modulo;
+}
+
+// Grow the handle map by doubling when it becomes full.
+// Doubling ensures that no hash collisions will occur in the new map.
+// Returns true on success, else false.
+static int
+handle_map_enlarge(void)
+{
+    // It is a severe problem if size ever exceeds max.
+    assert(HandleMapSize <= HandleMapMax);
+
+    // Fail when we reach the limit.
+    if (HandleMapSize == HandleMapMax) return 0;
+
+    // Take an exclusive writer lock.
+    // This will block til all reader locks have been released.
+    handle_wrlock();
+
+    // The new map must be double the size of the current map.
+    unsigned newsize = HandleMapSize << 1;
+    size_t   memsize = newsize * sizeof(nft_handle_map);
+
+    // Refuse to allocate more than HandleMapMax handles.
+    if (newsize > HandleMapMax) return 0;
+
+    nft_handle_map * newmap = malloc(memsize);
+    if (newmap) {
+	// Initialize every reference count to -1.
+	for (unsigned i = 0; i < newsize; i++) newmap[i].refcount = -1;
+
+	// Copy all current objects to the new handle map.
+	for (unsigned i = 0; i < HandleMapSize; i++)
+	    if (HandleMap[i].refcount) {
+		nft_handle handle = HandleMap[i].object->handle;
+
+		// Confirm that this is not a hash collision.
+		assert(newmap[handle_hash(handle, newsize)].refcount == -1);
+
+		newmap[handle_hash(handle, newsize)] = HandleMap[handle_hash(handle, HandleMapSize)];
+	    }
+
+	// Replace the old HandleMap with the new map.
+	free(HandleMap);
+	HandleMap     = newmap;
+	HandleMapSize = newsize;
+    }
+    handle_unlock();
+    return newmap != NULL;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ public APIs below ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// Given a nft_core object, allocate a handle and add it to the HandleMap.
+nft_handle
+nft_handle_alloc(nft_core * object)
+{
+    // Ensure that the handle table and mutex are initialized.
+    if (nft_handle_init()) return NULL;
+
+    nft_handle handle = NULL;
+    int        locked;
+rescan:
+    locked = handle_rdlock();
+
+    // Scan for the next open slot in the HandleMap.
+    // FIXME With concurrent access, it is not so simple to know when the table is full.
+    for (unsigned n = 0; n < HandleMapSize; n++)
+    {
+	// Allocate a fresh unique handle and try again.
+	nft_handle       temp  = handle_next();
+	unsigned         index = handle_hash(temp, HandleMapSize);
+	nft_handle_map * slot  = &HandleMap[index];
+
+	// If this map slot is not in use, allocate it to this handle.
+	// Free slots have a reference count -1, and slots with zero are "busy".
+	if (__sync_bool_compare_and_swap (&slot->refcount, -1, 0)) {
+	    object->handle = handle = temp;
+	    slot->object   = object;
+	    __sync_bool_compare_and_swap (&slot->refcount,  0, 1);
+	    break;
+	}
+    }
+    if (locked) handle_unlock();
+
+    // If the HandleMap table is full, we get a writer lock and reallocate it.
+    if (!handle && handle_map_enlarge()) goto rescan;
+
+    return handle;
+}
+
+// Look up a handle, atomically incrementing the object reference count.
+nft_core *
+nft_handle_lookup(nft_handle handle)
+{
+    if (!handle) return NULL; // NULL is an invalid handle by definition.
+
+    int locked = handle_rdlock();
+
+    // Compute our index into the HandleMap table.
+    unsigned         index  = handle_hash(handle, HandleMapSize);
+    nft_handle_map * slot   = &HandleMap[index];
+    nft_core       * object = NULL;
+
+    if (handle_map_increment(slot) > 0)
+    {
+	// handle_map_acquire will only increment refcounts that were already positive,
+	// so this result means that we have locked a live object reference.
+	// But, is this the object that we are looking for?
+	if (handle == slot->object->handle)
+	    object  = slot->object;
+	else
+	    // This object has a different handle, so we must decrement our increment.
+	    handle_map_decrement(slot);
+    }
+    if (locked) handle_unlock();
+    return object;
+}
+
+// Decrement the object's reference count. If the new reference
+// count is zero, free the map slot and destroy the object.
+// Returns zero on success, or EINVAL on invalid handles.
+int
+nft_handle_discard(nft_core * object)
+{
+    int result = 0;
+    int locked = handle_rdlock();
+    unsigned         index = handle_hash(object->handle, HandleMapSize);
+    nft_handle_map * slot  = &HandleMap[index];
+
+    // Unlike nft_handle_lookup, this should only be called on live objects.
+    assert(slot->object == object);
+    assert(slot->refcount > 0);
+
+    // If this slot is live, decrement the counter, and destroy the object if necessary.
+    if (slot->object == object && slot->refcount > 0)
+	handle_map_decrement(slot);
+    else
+	result = EINVAL;
+
+    if (locked) handle_unlock();
+    return result;
+}
+
+void
+nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char * class, void * argument)
+{
+    // Ensure that the handle table and mutex are initialized.
+    if (nft_handle_init()) return;
+
+    int locked = handle_rdlock();
+
+    for(unsigned i = 0; i < HandleMapSize; i++)
+    {
+	nft_handle_map * slot = &HandleMap[i];
+	if (handle_map_increment(slot) > 0)
+	{
+	    nft_core * object = slot->object;
+
+	    // Call function, passing object, class and argument.
+	    function(object, class, argument);
+
+	    handle_map_decrement(slot);
+	}
+    }
+    if (locked) handle_unlock();
 }
 
 #endif // NFT_LOCKLESS

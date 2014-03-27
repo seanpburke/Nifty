@@ -248,12 +248,12 @@ int    nft_queue_enqueue(nft_queue * q, void * item, int timeout, char which);
 int    nft_queue_dequeue(nft_queue * q, int timeout, void ** item);
 void   nft_queue_destroy(nft_core * p);
 
-// Declare helper functions nft_queue_cast, _handle, _lookup, _discard, _list.
+// Declare helper functions nft_queue_cast, _handle, _lookup, _discard, _gather.
 #define nft_queue_class nft_core_class ":nft_queue"
 NFT_DECLARE_CAST(nft_queue)
 NFT_DECLARE_HANDLE(nft_queue)
 NFT_DECLARE_LOOKUP(nft_queue)
 NFT_DECLARE_DISCARD(nft_queue)
-NFT_DECLARE_LIST(nft_queue)
+NFT_DECLARE_GATHER(nft_queue)
 
 #endif // _NFT_QUEUE_H_

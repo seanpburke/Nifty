@@ -124,12 +124,12 @@ void nft_task_destroy(nft_core * p);
 int  nft_task_schedule_task(nft_task * task);
 int  nft_task_cancel_task(nft_task * task);
 
-// Declare helper functions nft_task_cast, _handle, _lookup, _discard, _list.
+// Declare helper functions nft_task_cast, _handle, _lookup, _discard, _gather.
 #define nft_task_class nft_core_class ":nft_task"
 NFT_DECLARE_CAST(nft_task)
 NFT_DECLARE_HANDLE(nft_task)
 NFT_DECLARE_LOOKUP(nft_task)
 NFT_DECLARE_DISCARD(nft_task)
-NFT_DECLARE_LIST(nft_task)
+NFT_DECLARE_GATHER(nft_task)
 
 #endif // _NFT_TASK_H_

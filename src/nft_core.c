@@ -113,48 +113,48 @@ nft_core_destroy(nft_core * p)
     }
 }
 
-// apply_enlist is passed to nft_handle_apply, which calls it on every nft_core object.
-// If the object is in the given class, the object's handle is added to the list.
+// gather_apply is passed to nft_handle_apply, which calls it on every nft_core object.
+// If the object is in the given class, the object's handle is added to the array.
 //
-struct handle_list {
+struct handle_array {
     unsigned     next;
     unsigned     size;
-    nft_handle * list;
+    nft_handle * array;
 };
 static void
-apply_enlist(nft_core * object, const char * class, void * argument)
+gather_apply(nft_core * object, const char * class, void * argument)
 {
-    struct handle_list * hlp = argument;
+    struct handle_array * hap = argument;
 
     if (nft_core_cast(object, class))
     {
-	// Have we reached the limit of our current list?
-	if (hlp->next == hlp->size) {
-	    // Allocate a list of twice the size, plus one more for the terminator.
-	    nft_handle * newlist = realloc(hlp->list, (2*hlp->size + 1) * sizeof(nft_handle));
-	    if (newlist) {
-		hlp->list  = newlist;
-		hlp->size *= 2;
+	// Have we reached the limit of our current array?
+	if (hap->next == hap->size) {
+	    // Allocate an array of twice the size, plus one more for the terminating null.
+	    nft_handle * new_array = realloc(hap->array, (2*hap->size + 1) * sizeof(nft_handle));
+	    if (new_array) {
+		hap->array = new_array;
+		hap->size *= 2;
 	    }
 	}
-	if (hlp->next < hlp->size) {
-	    hlp->list[hlp->next++] = object->handle;
+	if (hap->next < hap->size) {
+	    hap->array[hap->next++] = object->handle;
 	}
     }
 }
 
-// Returns
+// Returns a null-terminated array of handles, for every object of the given class.
 nft_handle *
-nft_core_list(const char * class)
+nft_core_gather(const char * class)
 {
-    int          size = 126;
-    nft_handle * list = malloc((size + 1) * sizeof(nft_handle));
-    struct handle_list hl = (struct handle_list){ 0, size, list };
-    if (hl.list) {
-	nft_handle_apply(apply_enlist, class, &hl);
-	hl.list[hl.next] = NULL;
+    int          size  = 126;
+    nft_handle * array = malloc((size + 1) * sizeof(nft_handle));
+    struct handle_array ha = (struct handle_array){ 0, size, array };
+    if (ha.array) {
+	nft_handle_apply(gather_apply, class, &ha);
+	ha.array[ha.next] = NULL;
     }
-    return hl.list;
+    return ha.array;
 }
 
 
@@ -209,7 +209,7 @@ main(int argc, char *argv[])
     }
 
     // Confirm that the objects we created are all present.
-    nft_handle * handles = nft_core_list(nft_core_class);
+    nft_handle * handles = nft_core_gather(nft_core_class);
     int i = 0;
     while (handles[i]) i++;
     assert(i == n);
@@ -220,7 +220,7 @@ main(int argc, char *argv[])
 	nft_core_discard(parray[i]);
 
     // Confirm that all objects have been destroyed.
-    handles = nft_core_list(nft_core_class);
+    handles = nft_core_gather(nft_core_class);
     i = 0;
     while (handles[i]) i++;
     assert(i == 0);
