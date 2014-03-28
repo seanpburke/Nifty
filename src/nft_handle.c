@@ -59,6 +59,20 @@ nft_handle_init(void)
     return HandleMap ? 0 : ENOMEM;
 }
 
+
+// The hash function for handles is 'hash = handle % table_size'.
+// Note that we do not have much freedom in this, because we require that
+// there be no hash-collisions among live handles, and that no collisions
+// are created when the HandleMap table is enlarged. For these reasons,
+// we require that the HandleMapSize be a power of 2, which in turn means
+// that it can only grow by doubling.
+static unsigned
+handle_hash(nft_handle handle, unsigned modulo)
+{
+    return (unsigned long) handle & (modulo - 1); // handle % modulo;
+}
+
+
 #ifndef NFT_LOCKLESS
 /*******************************************************************************
  *  POSIX portable implementation of the nft_handle APIs using mutexes.
@@ -93,14 +107,6 @@ handle_once(void)
     if ((HandleMap = malloc(memsize))) memset(HandleMap,0,memsize);
 }
 
-static unsigned
-handle_hash(nft_handle handle, unsigned modulo)
-{
-    // For speed's sake, we do binary modulo arithmetic,
-    // but this assumes that modulo is a power of two.
-    return (unsigned long) handle & (modulo - 1); // handle % modulo;
-}
-
 // Grow the handle map by doubling when it becomes full.
 // Doubling ensures that no hash collisions will occur in the new map.
 // The caller must hold HandleMapMutex.
@@ -119,12 +125,12 @@ handle_map_enlarge(void)
 
 	// Copy all current objects to the new handle map.
 	for (unsigned i = 0; i < HandleMapSize; i++)
-	    if (HandleMap[i].refcount) {
+	    if (HandleMap[i].refcount > 0 &&
+		HandleMap[i].object  != NULL)
+	    {
 		nft_handle handle = HandleMap[i].object->handle;
-
 		// Confirm that this is not a hash collision.
 		assert(newmap[handle_hash(handle, newsize)].refcount == 0);
-
 		newmap[handle_hash(handle, newsize)] = HandleMap[handle_hash(handle, HandleMapSize)];
 	    }
 
@@ -151,22 +157,30 @@ nft_handle_alloc(nft_core * object)
     if (nft_handle_init()) return NULL;
 
     int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
+    do {
+	// We do not have any direct measure of our table's load-factor,
+	// so we enlarge the table if we encounter Size/2 non-free slots,
+	// unless the table is at its maximum size, in which case we search
+	// the entire table.
+	unsigned limit = (HandleMapSize < HandleMapMax) ? HandleMapSize / 2 : HandleMapSize;
 
-rescan: // Scan for the next open slot in the HandleMap
-    for (unsigned i = 0; i < HandleMapSize; i++, NextHandle++) {
-	if (NextHandle) {
-	    unsigned index = handle_hash((nft_handle)NextHandle, HandleMapSize);
-	    if (HandleMap[index].refcount == 0) {
-		object->handle = handle = (nft_handle) NextHandle++;
-		HandleMap[index] = (nft_handle_map){ 1, object };
-		break;
+	// Scan for the next open slot in the HandleMap.
+	// This is similar to a hash table that uses linear probing, with the difference
+	// that instead of handling hash collisions, we are searching for a new handle
+	// which has no hash collision.
+	for (unsigned i = 0; i < limit ; i++, NextHandle++) {
+	    if (NextHandle) {
+		unsigned index = handle_hash((nft_handle)NextHandle, HandleMapSize);
+		if (HandleMap[index].refcount == 0) {
+		    object->handle = handle = (nft_handle) NextHandle++;
+		    HandleMap[index] = (nft_handle_map){ 1, object };
+		    break;
+		}
 	    }
 	}
-    }
-    // If the table is full, and we are able to enlarge it, try again.
-    if (!handle && handle_map_enlarge()) goto rescan;
-
+    } while (!handle && handle_map_enlarge());
     rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
+
     return handle;
 }
 
@@ -287,6 +301,8 @@ nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char 
  */
 static pthread_rwlock_t  HandleRWlock = PTHREAD_RWLOCK_INITIALIZER;
 
+// If HandleMapSize == HandleMapMax, handle_rdlock skips the lock,
+// and returns false, since the table can no longer be enlarged.
 static int
 handle_rdlock(void) {
     if (HandleMapSize < HandleMapMax) {
@@ -321,22 +337,6 @@ handle_once(void)
 	    HandleMap[i] = (nft_handle_map){ -1, NULL };
 }
 
-
-// Return a new, unique handle.
-static nft_handle
-handle_next(void)
-{
-    // We will increment this counter to generate a sequence of unique handles.
-    static unsigned long NextHandle = 1;
-
-    // Use gcc atomic builtin to increment NextHandle, so that no mutex is needed.
-    nft_handle   handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
-
-    // Since NULL is an invalid handle, increment once more in that case.
-    if (!handle) handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
-
-    return handle;
-}
 
 // Increment or decrement a positive reference count,
 // returning the prior value of the reference count.
@@ -391,15 +391,6 @@ handle_map_decrement(nft_handle_map * slot)
     }
 }
 
-// Given a handle, compute the index of this handle's map table slot.
-static unsigned
-handle_hash(nft_handle handle, unsigned modulo)
-{
-    // For speed's sake, we do binary modulo arithmetic,
-    // but this assumes that modulo is a power of two.
-    return (unsigned long) handle & (modulo - 1); // handle % modulo;
-}
-
 // Grow the handle map by doubling when it becomes full.
 // Doubling ensures that no hash collisions will occur in the new map.
 // Returns true on success, else false.
@@ -430,12 +421,12 @@ handle_map_enlarge(void)
 
 	// Copy all current objects to the new handle map.
 	for (unsigned i = 0; i < HandleMapSize; i++)
-	    if (HandleMap[i].refcount) {
+	    if (HandleMap[i].refcount > 0 &&
+		HandleMap[i].object  != NULL)
+	    {
 		nft_handle handle = HandleMap[i].object->handle;
-
 		// Confirm that this is not a hash collision.
 		assert(newmap[handle_hash(handle, newsize)].refcount == -1);
-
 		newmap[handle_hash(handle, newsize)] = HandleMap[handle_hash(handle, HandleMapSize)];
 	    }
 
@@ -448,42 +439,60 @@ handle_map_enlarge(void)
     return newmap != NULL;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ public APIs below ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Return a new, unique handle.
+static nft_handle
+handle_next(void)
+{
+    // We will increment this counter to generate a sequence of unique handles.
+    static unsigned long NextHandle = 1;
+
+    // Use gcc atomic builtin to increment NextHandle, so that no mutex is needed.
+    nft_handle   handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
+
+    // Since NULL is an invalid handle, increment once more in that case.
+    if (!handle) handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
+
+    return handle;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ non-static calls below ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Given a nft_core object, allocate a handle and add it to the HandleMap.
 nft_handle
 nft_handle_alloc(nft_core * object)
 {
+    nft_handle handle = NULL;
+
     // Ensure that the handle table and mutex are initialized.
     if (nft_handle_init()) return NULL;
 
-    nft_handle handle = NULL;
-    int        locked;
-rescan:
-    locked = handle_rdlock();
+    do {
+	int locked = handle_rdlock();
 
-    // Scan for the next open slot in the HandleMap.
-    // FIXME With concurrent access, it is not so simple to know when the table is full.
-    for (unsigned n = 0; n < HandleMapSize; n++)
-    {
-	// Allocate a fresh unique handle and try again.
-	nft_handle       temp  = handle_next();
-	unsigned         index = handle_hash(temp, HandleMapSize);
-	nft_handle_map * slot  = &HandleMap[index];
+	// In the lockless model, we have even less information about the load-factor,
+	// since other threads can be modifying the table as we scan it.
+	unsigned limit = (HandleMapSize < HandleMapMax) ? HandleMapSize / 2 : HandleMapSize;
 
-	// If this map slot is not in use, allocate it to this handle.
-	// Free slots have a reference count -1, and slots with zero are "busy".
-	if (__sync_bool_compare_and_swap (&slot->refcount, -1, 0)) {
-	    object->handle = handle = temp;
-	    slot->object   = object;
-	    __sync_bool_compare_and_swap (&slot->refcount,  0, 1);
-	    break;
+	// Scan for the next open slot in the HandleMap.
+	for (unsigned n = 0; n < limit ; n++)
+	{
+	    // Allocate a fresh unique handle and try again.
+	    nft_handle       temp  = handle_next();
+	    unsigned         index = handle_hash(temp, HandleMapSize);
+	    nft_handle_map * slot  = &HandleMap[index];
+
+	    // If this map slot is not in use, allocate it to this handle.
+	    // Free slots have a reference count -1, and slots with zero are "busy".
+	    if (__sync_bool_compare_and_swap (&slot->refcount, -1, 0)) {
+		object->handle = handle = temp;
+		slot->object   = object;
+		__sync_bool_compare_and_swap (&slot->refcount,  0, 1);
+		break;
+	    }
 	}
+	if (locked) handle_unlock();
     }
-    if (locked) handle_unlock();
-
-    // If the HandleMap table is full, we get a writer lock and reallocate it.
-    if (!handle && handle_map_enlarge()) goto rescan;
+    while (!handle && handle_map_enlarge());
 
     return handle;
 }

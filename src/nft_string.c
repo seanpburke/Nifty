@@ -13,12 +13,16 @@
  * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
+ ******************************************************************************
+ *
  * File: nft_string.c
  *
- * Description:
+ * DESCRIPTION
  *
  * This package illustrates a very simple shared string class,
- * purely to demonstrate how subclasseses are created from nft_core.
+ * purely to demonstrate how subclasses are created from nft_core.
+ * This file includes a test driver that illustrates how the core
+ * APIs are used.
  *
  *******************************************************************************
  */

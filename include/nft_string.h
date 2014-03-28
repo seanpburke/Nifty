@@ -20,7 +20,8 @@
  * DESCRIPTION
  *
  * This package illustrates a very simple shared string class,
- * purely to demonstrate how subclasseses are created from nft_core.
+ * purely to demonstrate how subclasses are created from nft_core.
+ * Refer to src/nft_string.c to see how this subclass is implemented.
  *
  ******************************************************************************
  */

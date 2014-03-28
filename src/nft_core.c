@@ -17,11 +17,12 @@
  *
  * File: nft_core.c
  *
- * Description: Core class for Nifty framework.
+ * DESCRIPTION
  *
- * This is the core "class" from which many Nifty packages are derived,
- * including nft_pool, nft_queue, and nft_task. The test driver at the
- * bottom of this file illustrates how to create a subclass of nft_core.
+ * This is the core "class" from which libnifty packages are derived,
+ * including nft_pool, nft_queue, and nft_task. The nft_string package
+ * provides a very simple demonstration, how to create a new package
+ * based on nft_core.
  *
  ******************************************************************************
  */
