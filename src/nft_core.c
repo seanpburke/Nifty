@@ -20,9 +20,8 @@
  * DESCRIPTION
  *
  * This is the core "class" from which libnifty packages are derived,
- * including nft_pool, nft_queue, and nft_task. The nft_string package
- * provides a very simple demonstration, how to create a new package
- * based on nft_core.
+ * including nft_pool, nft_queue, and nft_task. For a simple example
+ * subclass that is based on nft_core, see nft_string.c.
  *
  ******************************************************************************
  */
@@ -76,7 +75,7 @@ nft_core_create(const char * class, size_t size)
 	// Initialize the object with a null handle.
 	*object = (nft_core) { class, NULL, nft_core_destroy };
 
-	// Attempt to allocate a handle for this object.
+	// Attempt to allocate a unique object->handle.
 	if (!nft_handle_alloc(object)) {
 	    free(object);
 	    object = NULL;
@@ -222,9 +221,7 @@ main(int argc, char *argv[])
 
     // Confirm that all objects have been destroyed.
     handles = nft_core_gather(nft_core_class);
-    i = 0;
-    while (handles[i]) i++;
-    assert(i == 0);
+    assert(NULL == handles[0]);
     free(handles);
 
     printf("nft_core: All tests passed.\n");
