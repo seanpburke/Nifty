@@ -36,7 +36,7 @@
 
 typedef struct nft_pool_h * nft_pool_h;
 
-/* nft_pool_create: Initialize a thread pool.
+/* nft_pool_new: Initialize a thread pool.
  *
  * The max_threads argument sets the maximum number of worker threads
  * that will be created to service work items. It must be one or higher.
@@ -50,13 +50,9 @@ typedef struct nft_pool_h * nft_pool_h;
  * silently increased to the minimum value.
  * 
  * Returns NULL on a malloc failure.
- *
- *  Note that nft_pool_create is actually a convenience macro.
- *  The function nft_pool_create_ex accepts class and size arguments,
- *  to enable subclasses to be authored, based on nft_pool.
  */
 nft_pool_h
-nft_pool_create(int queue_limit, int max_threads, int stack_size);
+nft_pool_new(int queue_limit, int max_threads, int stack_size);
 
 /* nft_pool_add:  Submit a work item to the pool.
  *
@@ -140,7 +136,7 @@ NFT_DECLARE_DISCARD(nft_pool)
 NFT_DECLARE_GATHER(nft_pool)
 
 nft_pool *
-nft_pool_create_ex(const char * class, size_t size,
-		   int queue_limit, int max_threads, int stack_size);
+nft_pool_create(const char * class, size_t size,
+		int queue_limit, int max_threads, int stack_size);
 
 #endif // _NFT_POOL_H_

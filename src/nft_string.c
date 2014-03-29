@@ -39,7 +39,7 @@
 #include <nft_string.h>
 
 
-// The macro below defines these functions:
+// The macro below defines the following functions:
 //
 //   nft_string *   nft_string_cast(nft_core * p);
 //   nft_string_h   nft_string_handle(const nft_string * s);
@@ -52,15 +52,15 @@ NFT_DEFINE_WRAPPERS(nft_string,)
 
 // The destructor should take a nft_core * parameter.
 void
-nft_string_destroy(nft_core * p)
+nft_string_destroy(nft_core * core)
 {
-    nft_string * object = nft_string_cast(p);
+    nft_string * object = nft_string_cast(core);
 
-    // The _cast function will return NULL if p is not a nft_string.
+    // The _cast function will return NULL if core is not a nft_string.
     if (object) free(object->string);
 
     // Remember to invoke the base-class destroyer last of all.
-    nft_core_destroy(p);
+    nft_core_destroy(core);
 }
 
 // The constructor should accept class and size parameters,

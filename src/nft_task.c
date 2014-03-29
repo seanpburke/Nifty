@@ -1022,9 +1022,9 @@ nft_task_pool_init(void)
     // Since we only need this for tasks that will be delayed by file and
     // network IO, we also want to allow a large number of threads.
     //
-    OurPool = nft_pool_create(1024, // use a large queue_limit
-			        64, // max_threads is also large
-			         0);// stack_size is the system default
+    OurPool = nft_pool_new(1024, // use a large queue_limit
+			     64, // max_threads is also large
+			      0);// stack_size is the system default
 }
 
 // This will override the default nft_task action.

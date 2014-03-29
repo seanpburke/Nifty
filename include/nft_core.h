@@ -78,7 +78,8 @@ NFT_TYPEDEF_HANDLE(subclass) \
 static NFT_DECLARE_CAST(subclass)   \
 static NFT_DECLARE_HANDLE(subclass) \
 static NFT_DECLARE_LOOKUP(subclass) \
-static NFT_DECLARE_DISCARD(subclass)
+static NFT_DECLARE_DISCARD(subclass) \
+static NFT_DECLARE_GATHER(subclass)
 
 
 #define NFT_DEFINE_CAST(subclass) \

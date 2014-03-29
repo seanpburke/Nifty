@@ -398,7 +398,7 @@ nft_queue_destroy(nft_core * p)
 }
 
 /*----------------------------------------------------------------------
- * nft_queue_create_ex()
+ * nft_queue_create()
  *
  * Allocate the base struct which contains head and tail list pointers,
  * and various other data. Returns queue pointer to the caller,
@@ -414,18 +414,12 @@ nft_queue_destroy(nft_core * p)
  * This returns the queue handle, but does not discard the reference
  * that was returned from nifty_core_create, so the queue reference
  * count will remain nonzero, until nft_queue_shutdown is called.
- *
- * ( Why the "_ex" suffix? Because we want nft_queue_create to be
- *   a clean API for code that uses nft_queue's encapsulated API.
- *   Only subclasses need to vary the class and size parameters,
- *   so only subclasses need to call this function directly.
- *   See nft_pool.c for example. )
  *----------------------------------------------------------------------
  */
 nft_queue *
-nft_queue_create_ex(const char * class,
-		    size_t       size,
-		    int          limit)
+nft_queue_create(const char * class,
+		 size_t       size,
+		 int          limit)
 {
     nft_queue * q = nft_queue_cast(nft_core_create(class, size));
     if (!q) return NULL;
@@ -451,16 +445,16 @@ nft_queue_create_ex(const char * class,
 }
 
 /*----------------------------------------------------------------------
- * nft_queue_create()
+ * nft_queue_new()
  *
- * Like nft_queue_create_ex, with simpler parameters,
+ * Like nft_queue_create, with simpler parameters,
  * and returning a nft_queue_h handle instead of nft_queue *.
  *----------------------------------------------------------------------
  */
 nft_queue_h
-nft_queue_create(int limit)
+nft_queue_new(int limit)
 {
-    return nft_queue_handle(nft_queue_create_ex(nft_queue_class, sizeof(nft_queue), limit));
+    return nft_queue_handle(nft_queue_create(nft_queue_class, sizeof(nft_queue), limit));
 }
 
 /*----------------------------------------------------------------------
@@ -865,8 +859,8 @@ main()
     fputs("multithread test, reading from stdin...\n", stderr);
 
     // Create the input and output queues.
-    input_Q  = nft_queue_create(Q_LIMIT);
-    output_Q = nft_queue_create(Q_LIMIT);
+    input_Q  = nft_queue_new(Q_LIMIT);
+    output_Q = nft_queue_new(Q_LIMIT);
 
     // Create the input, output, and worker threads.
     rc = pthread_attr_init(&attr); assert(!rc);
@@ -927,7 +921,7 @@ t1( void)
 {
     fprintf(stderr, "t1 (create/shutdown): ");
 
-    nft_queue_h q = nft_queue_create(0);
+    nft_queue_h q = nft_queue_new(0);
     assert(q);
 
     for (int i = 0 ; Strings[ i] != NULL ; i++)
@@ -956,7 +950,7 @@ t2( void)
     fprintf(stderr, "t2 (add/push/pop): ");
 
     // Create an unlimited queue
-    nft_queue_h q = nft_queue_create(0);
+    nft_queue_h q = nft_queue_new(0);
 
     // With the queue empty, test the pop timeout.
     assert(ETIMEDOUT == nft_queue_pop_wait_ex(q, 0, &ss));
@@ -997,7 +991,7 @@ t3( void)
     fprintf(stderr, "t3 (count/peek/state):");
 
     // Create an unlimited queue.
-    nft_queue_h q = nft_queue_create(0);
+    nft_queue_h q = nft_queue_new(0);
 
     // Test the _add(), _count() and _peek() operations.
     int   i;
@@ -1050,7 +1044,7 @@ t4( void)
     fprintf(stderr, "t4 (add/shutdown): ");
 
     // Create a queue that is limited to one item.
-    nft_queue_h q = nft_queue_create(1);
+    nft_queue_h q = nft_queue_new(1);
     nft_queue_add(q, "first");
 
     // The queue limit is one, so this add should timeout immediately.
@@ -1086,7 +1080,7 @@ t5( void)
 {
     fprintf(stderr, "t5 (pop/shutdown): ");
 
-    nft_queue_h q = nft_queue_create(1); assert(q);
+    nft_queue_h q = nft_queue_new(1); assert(q);
 
     // The queue is empty, so the thread will block.
     pthread_t th;
@@ -1116,7 +1110,7 @@ t6( void)
 
     fprintf(stderr, "t6 (add/cancel): ");
 
-    nft_queue_h q = nft_queue_create(1);
+    nft_queue_h q = nft_queue_new(1);
     nft_queue_add(q, "first");
 
     // The queue limit is one, so the add_thread will block.
@@ -1151,7 +1145,7 @@ t7( void)
 
     fprintf(stderr, "t7 (pop/cancel): ");
 
-    nft_queue_h q = nft_queue_create(1);
+    nft_queue_h q = nft_queue_new(1);
 
     // The queue is empty, so pop_thread will block.
     pthread_t    th;

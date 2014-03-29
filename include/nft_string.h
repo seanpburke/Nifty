@@ -44,9 +44,7 @@ typedef struct nft_string
 // and pass it to the constructor to set the instance's .class.
 #define nft_string_class nft_core_class ":nft_string"
 
-NFT_DECLARE_WRAPPERS(nft_string,)
-//
-// The macro above expands to the following declarations:
+// The macro below expands to the following declarations:
 //
 //   typedef struct nft_string_h * nft_string_h;
 //   nft_string *   nft_string_cast(nft_core * p);
@@ -54,6 +52,8 @@ NFT_DECLARE_WRAPPERS(nft_string,)
 //   nft_string *   nft_string_lookup(nft_string_h h);
 //   void           nft_string_discard(nft_string * s);
 //   nft_string_h * nft_string_list(void);
+//
+NFT_DECLARE_WRAPPERS(nft_string,)
 
 // Declare public APIs for our string package
 nft_string * nft_string_new(const char * data);

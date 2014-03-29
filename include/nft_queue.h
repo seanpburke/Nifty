@@ -54,7 +54,7 @@ typedef struct nft_queue_h * nft_queue_h;
  *
  *  Returns	NULL on malloc failure.
  */
-nft_queue_h nft_queue_create(int limit);
+nft_queue_h nft_queue_new(int limit);
 
 
 /*  Append an item to the tail of the queue.
@@ -242,11 +242,10 @@ typedef struct nft_queue
     void              * minarray[NFT_QUEUE_MIN_SIZE]; // Initial array
 } nft_queue;
 
-nft_queue *
-nft_queue_create_ex(const char * class, size_t size, int limit);
-int    nft_queue_enqueue(nft_queue * q, void * item, int timeout, char which);
-int    nft_queue_dequeue(nft_queue * q, int timeout, void ** item);
-void   nft_queue_destroy(nft_core * p);
+nft_queue * nft_queue_create(const char * class, size_t size, int limit);
+int         nft_queue_enqueue(nft_queue * q, void * item, int timeout, char which);
+int         nft_queue_dequeue(nft_queue * q, int timeout, void ** item);
+void        nft_queue_destroy(nft_core  * p);
 
 // Declare helper functions nft_queue_cast, _handle, _lookup, _discard, _gather.
 #define nft_queue_class nft_core_class ":nft_queue"
