@@ -173,7 +173,7 @@ queue_shrink(nft_queue * q)
  *  queue_cleanup() 	- cancellation cleanup handler.
  *
  *  This handler is called when a pool thread is cancelled
- *  while blocked in nft_queue_shutdown.
+ *  while blocked in queue_wait() or nft_queue_shutdown().
  *----------------------------------------------------------------------
  */
 static void
@@ -290,7 +290,10 @@ nft_queue_enqueue(nft_queue * q,  void * item,  int timeout, char which)
 
 		/* Threads may be waiting in nft_queue_dequeue, so wake them.
 		 * Since the condition is shared between _enqueue and _dequeue
-		 * threads, we need to do a broadcast.
+		 * threads, we need to do a broadcast. You might think it not
+		 * possible for threads to be blocked in _enqueue and _dequeue
+		 * simultaneously, but it can happen, and if our signal is not
+		 * given to a thread waiting to dequeue, the signal is lost.
 		 */
 		int rc = pthread_cond_broadcast(&q->cond); assert(rc == 0);
 	    }

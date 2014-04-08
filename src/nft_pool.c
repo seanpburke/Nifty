@@ -530,18 +530,18 @@ NFT_DEFINE_WRAPPERS(nft_action_pool,static)
 
 // Our constructor adds one parameter to initialize the new attribute.
 nft_action_pool_h
-nft_action_pool_create(int     queue_limit,
-		       int     max_threads,
-		       int     stack_size,
-		       void (* action)(void *))
+nft_action_pool_new(int     queue_limit,
+		    int     max_threads,
+		    int     stack_size,
+		    void (* action)(void *))
 {
     // Invoke the base class "private" constructor, passing our class string and size.
     nft_pool * pool = nft_pool_create(nft_action_pool_class, sizeof(nft_action_pool), queue_limit, max_threads, stack_size);
     if (!pool) return NULL;
 
-    nft_action_pool * pool_action = nft_action_pool_cast(pool);
-    pool_action->action = action;
-    return nft_action_pool_handle(pool_action);
+    nft_action_pool * action_pool = nft_action_pool_cast(pool);
+    action_pool->action = action;
+    return nft_action_pool_handle(action_pool);
 }
 
 // The _add operation has no function parameter:
@@ -578,10 +578,10 @@ test_nft_action_pool(void)
     // With this subclass, we set the pool's action function when we
     // create it.
     nft_action_pool_h action_pool =
-	nft_action_pool_create(-1, // default queue_limit
-				0, // default max_threads
-				0, // default stack size
-				clear_flag );
+	nft_action_pool_new(-1, // default queue_limit
+			     0, // default max_threads
+			     0, // default stack size
+			     clear_flag );
     assert(NULL != action_pool);
 
     for (int i = 0; i < 10; i++) flags[i] = 1;

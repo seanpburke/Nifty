@@ -199,8 +199,7 @@ main(int argc, char *argv[])
     assert(NULL == r);
 
     // Test handle_map_enlarge
-    // int     n = 10000;
-    int        n = 1000;
+    int        n = 100000;
     nft_core * parray[n];
     for (int i = 0; i < n; i++) {
 	nft_core * core = nft_core_create(nft_core_class, sizeof(nft_core));

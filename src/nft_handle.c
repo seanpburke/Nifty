@@ -414,6 +414,7 @@ handle_map_enlarge(void)
     // Refuse to allocate more than HandleMapMax handles.
     if (newsize > HandleMapMax) return 0;
 
+    nft_handle_map * oldmap = NULL;
     nft_handle_map * newmap = malloc(memsize);
     if (newmap) {
 	// Initialize every reference count to -1.
@@ -431,11 +432,15 @@ handle_map_enlarge(void)
 	    }
 
 	// Replace the old HandleMap with the new map.
-	free(HandleMap);
+	oldmap        = HandleMap;
 	HandleMap     = newmap;
-	HandleMapSize = newsize;
+	HandleMapSize = newsize; // FIXME Need a release barrier here
     }
     handle_unlock();
+
+    // We can free the old map outside the lock.
+    if (oldmap) free(oldmap);
+
     return newmap != NULL;
 }
 

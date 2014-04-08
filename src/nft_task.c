@@ -1154,10 +1154,8 @@ test_heap()
     printf(" Passed!\n");
 }
 
-/* main - Unit test for nft_task
- *
- * Note that the tests depend on assert(),
- * which means you must not compile with NDEBUG.
+/*
+ * main - Unit test for nft_task
  */
 int
 main(int argc, char *argv[])
