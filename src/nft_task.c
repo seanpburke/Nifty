@@ -346,33 +346,38 @@ nft_task_schedule_task(nft_task * task)
 }
 
 // Attempt to remove the task from the Queue.
-// It may not be found, if the task has already executed.
+// Returns true if the task was found and canceled.
+// It will not be found, if the task has already executed.
 int
 nft_task_cancel_task(nft_task * task)
 {
-    // Check that the task argument is a valid nft_task reference.
-    if (!nft_task_cast(task)) return EINVAL;
+    int result = 0;
+
+    // Ensure that the task argument is a valid nft_task reference.
+    assert(nft_task_cast(task));
 
     // Ensure task package is initialized.
     int rc = pthread_once(&QueueOnce, task_init); assert(rc == 0);
 
-    // If the task is still in the queue, delete it and free the task object.
-    rc = pthread_mutex_lock(&QueueMutex); assert(rc == 0);
+    // Lock the queue.
+    rc = pthread_mutex_lock(&QueueMutex);     assert(rc == 0);
 
     // Note that queue entries start at 1, not zero.
     for (unsigned i = 1; i <= Queue.count; i++)
 	if (Queue.tasks[i] == task)
 	{
-	    // Discard the reference that was stored in the queue.
-	    // This reference was created in nft_task_schedule by nft_task_create().
-	    nft_task_discard(Queue.tasks[i]);
-
 	    // Remove the task from the queue.
 	    heap_delete(&Queue, i);
+
+	    // Discard the reference that was stored in the queue.
+	    // This reference was created in nft_task_schedule by nft_task_create().
+	    nft_task_discard(task);
+
+	    result = 1;
 	    break;
 	}
     rc = pthread_mutex_unlock(&QueueMutex); assert(rc == 0);
-    return 0;
+    return result;
 }
 
 
@@ -418,7 +423,7 @@ nft_task_schedule(struct timespec abstime,
 /*-----------------------------------------------------------------------------
  * nft_task_cancel - Cancel a scheduler task.
  *
- * Returns the task->arg to the caller, in case the caller needs to free it.
+ * Returns the task->arg to the caller if the task was canceled successfully.
  * Returns NULL if the task was not found, as with a one-shot that has already
  * executed. So yes, you need to make arg non-null to distinguish failure.
  *-----------------------------------------------------------------------------
@@ -427,15 +432,15 @@ void *
 nft_task_cancel(nft_task_h handle)
 {
     void     * argument = NULL;
-    nft_task * task = nft_task_lookup(handle);
+    nft_task * task     = nft_task_lookup(handle);
 
     if (task) {
-	int rc = nft_task_cancel_task(task); assert(rc == 0);
-
-	// Save the function arg, _before_ we discard the nft_task reference
-	// that we obtained from nft_task_lookup. It will not be safe to use
-	// the task pointer after it has been discarded.
-	argument = task->argument;
+	if (nft_task_cancel_task(task)) {
+	    // Save the function arg, _before_ we discard the nft_task reference
+	    // that we obtained from nft_task_lookup. It will not be safe to use
+	    // the task pointer after it has been discarded.
+	    argument = task->argument;
+	}
 	nft_task_discard(task);
     }
     return argument;
