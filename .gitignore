@@ -2,7 +2,6 @@
 *.o
 src/nft_core
 src/nft_handle
-src/nft_hash
 src/nft_pool
 src/nft_queue
 src/nft_string

@@ -38,6 +38,17 @@
 
 #include <nft_string.h>
 
+/* Each subclass must have a unique class name. The class name must be
+   prefixed by "nft_core", so that the libnifty code will recognize the
+   object as a subclass of nft_core. Similarly, each parent class name
+   must appear in sequence, so that upcasts work correctly.
+
+   The subclass name must be defined as a macro or string constant
+   named "<subclass>_class". The macro that defines the typesafe-cast
+   function subclass_cast(), expects this symbol.
+*/
+#define nft_string_class nft_core_class ":" "nft_string"
+
 
 // The macro below defines the following functions:
 //

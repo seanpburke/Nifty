@@ -70,7 +70,7 @@ nft_core *
 nft_core_create(const char * class, size_t size)
 {
     assert(class && size);
-    nft_core * object = malloc(size);
+    nft_core * object = calloc(1, size);
     if ( object ) {
 	// Initialize the object with a null handle.
 	*object = (nft_core) { class, NULL, nft_core_destroy };
@@ -144,6 +144,7 @@ gather_apply(nft_core * object, const char * class, void * argument)
 }
 
 // Returns a null-terminated array of handles, for every object of the given class.
+// Note that the objects may not be fully initialized, so be very careful with them.
 nft_handle *
 nft_core_gather(const char * class)
 {
@@ -171,8 +172,6 @@ nft_core_gather(const char * class)
 #endif
 #include <assert.h>
 #include <stdio.h>
-
-#include <nft_string.h>
 
 // Test (and demonstrate) use of the constructor and helper functions.
 //

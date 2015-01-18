@@ -40,10 +40,6 @@ typedef struct nft_string
     char   * string;
 } nft_string;
 
-// You must define a macro for the subclass's class name,
-// and pass it to the constructor to set the instance's .class.
-#define nft_string_class nft_core_class ":nft_string"
-
 // The macro below expands to the following declarations:
 //
 //   typedef struct nft_string_h * nft_string_h;

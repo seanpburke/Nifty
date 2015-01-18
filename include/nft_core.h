@@ -47,7 +47,7 @@ typedef void * nft_handle;
 typedef struct nft_core {
     const char  * class;
     nft_handle    handle;
-    void        (*destroy)(struct nft_core *);
+    void       (* destroy )(struct nft_core *);
 } nft_core;
 
 nft_core   * nft_core_create(const char * class, size_t size);

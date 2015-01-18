@@ -69,7 +69,7 @@ struct	timespec {
 
 // nft_gettime returns the current time as a struct timespec, converting if necessary.
 //
-static struct timespec
+inline struct timespec
 nft_gettime(void)
 {
 #if defined(USE_FTIME)

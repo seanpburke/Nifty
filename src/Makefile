@@ -100,3 +100,4 @@ $(LIBDIR):
 
 clean:
 	-rm *.o *.exe $(LIB) $(EXES) $(DISTDIR)
+	-rm -r *.dSYM

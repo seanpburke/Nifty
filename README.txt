@@ -125,12 +125,8 @@ even after nft_queue_shutdown returns successfully.
 Every thread that is blocked within a nft_queue API call, will hold
 a reference to the underlying object for the duration of that call.
 Each thread will discard that reference as it returns from the API
-that it had called. The queue will only be destroyed when the last
-reference has been discarded, and there is no guarantee that the
-caller of nft_queue_shutdown will be the last thread. However,
-the queue's handle will have been invalidated, which means that
-no new references to the object can be obtained, so the queue
-should be destroyed eventually.
+that it had called. The handle will be invalidated, and the queue
+destroyed, only when the last reference has been discarded.
 
 This discussion illustrates why libnifty API calls use handles.
 Reference counting of some kind, is virtually unavoidable when
