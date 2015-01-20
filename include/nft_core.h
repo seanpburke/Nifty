@@ -83,15 +83,24 @@ static NFT_DECLARE_GATHER(subclass)
 
 
 #define NFT_DEFINE_CAST(subclass) \
-subclass * subclass##_cast(void * vp) { return nft_core_cast(vp, subclass##_class); }
+subclass * subclass##_cast(void * vp) \
+{ return nft_core_cast(vp, subclass##_class); }
+
 #define NFT_DEFINE_HANDLE(subclass) \
-subclass##_h subclass##_handle(const subclass * sc) { nft_core * c = nft_core_cast(sc,nft_core_class); return c ? c->handle : c; }
+subclass##_h subclass##_handle(const subclass * sc) \
+{ nft_core * c = nft_core_cast(sc,nft_core_class); return c ? c->handle : c; }
+
 #define NFT_DEFINE_LOOKUP(subclass) \
-subclass * subclass##_lookup(subclass##_h hl) { return subclass##_cast(nft_core_lookup(hl)); }
-#define NFT_DEFINE_DISCARD(subclass) \
-int subclass##_discard(subclass * sc) { return nft_core_discard((nft_core*) sc); }
+subclass * subclass##_lookup(subclass##_h h) \
+{ nft_core * c = nft_core_lookup(h); subclass * sc = subclass##_cast(c); if (c && !sc) nft_core_discard(c); return sc; }
+
+#define NFT_DEFINE_DISCARD(subclass)  \
+int subclass##_discard(subclass * sc) \
+{ return nft_core_discard((nft_core*) sc); }
+
 #define NFT_DEFINE_GATHER(subclass) \
-subclass##_h * subclass##_gather(void) { return (subclass##_h *) nft_core_gather(subclass##_class); }
+subclass##_h * subclass##_gather(void) \
+{ return (subclass##_h *) nft_core_gather(subclass##_class); }
 
 
 // Note that static is a parameter, which can be empty.
