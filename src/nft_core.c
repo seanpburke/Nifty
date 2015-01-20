@@ -40,9 +40,9 @@
  *******************************************************************************
  */
 void *
-nft_core_cast(void * vp, const char * class)
+nft_core_cast(const void * vp, const char * class)
 {
-    nft_core * object = vp;
+    nft_core * object = (nft_core *) vp;
 
     // It is OK to pass a null object pointer to this call, but if the
     // object->class pointer is null, that means  that the object has
