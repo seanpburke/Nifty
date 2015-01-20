@@ -69,8 +69,6 @@ subclass##_h subclass##_handle(const subclass *);
 subclass * subclass##_lookup(subclass##_h);
 #define NFT_DECLARE_DISCARD(subclass) \
 int subclass##_discard(subclass *);
-#define NFT_DECLARE_GATHER(subclass) \
-subclass##_h * subclass##_gather(void);
 
 // Note that static is a parameter, which can be empty.
 #define NFT_DECLARE_WRAPPERS(subclass, static) \
@@ -78,8 +76,7 @@ NFT_TYPEDEF_HANDLE(subclass) \
 static NFT_DECLARE_CAST(subclass)   \
 static NFT_DECLARE_HANDLE(subclass) \
 static NFT_DECLARE_LOOKUP(subclass) \
-static NFT_DECLARE_DISCARD(subclass) \
-static NFT_DECLARE_GATHER(subclass)
+static NFT_DECLARE_DISCARD(subclass)
 
 
 #define NFT_DEFINE_CAST(subclass) \
@@ -98,17 +95,11 @@ subclass * subclass##_lookup(subclass##_h h) \
 int subclass##_discard(subclass * sc) \
 { return nft_core_discard((nft_core*) sc); }
 
-#define NFT_DEFINE_GATHER(subclass) \
-subclass##_h * subclass##_gather(void) \
-{ return (subclass##_h *) nft_core_gather(subclass##_class); }
-
-
 // Note that static is a parameter, which can be empty.
 #define NFT_DEFINE_WRAPPERS(subclass, static) \
 static NFT_DEFINE_CAST(subclass)    \
 static NFT_DEFINE_HANDLE(subclass)  \
 static NFT_DEFINE_LOOKUP(subclass)  \
-static NFT_DEFINE_DISCARD(subclass) \
-static NFT_DEFINE_GATHER(subclass)
+static NFT_DEFINE_DISCARD(subclass)
 
 #endif // _NFT_CORE_H_

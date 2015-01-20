@@ -56,7 +56,6 @@
 //   nft_string_h   nft_string_handle(const nft_string * s);
 //   nft_string *   nft_string_lookup(nft_string_h h);
 //   void           nft_string_discard(nft_string * s);
-//   nft_string_h * nft_string_gather(void);
 //
 NFT_DEFINE_WRAPPERS(nft_string,)
 
@@ -145,16 +144,22 @@ main(int argc, char *argv[])
     // has been freed, because stale handles are ignored.
     nft_string_print(h);
 
-    // nft_string_gather returns an array with the handle of every nft_string instance.
-    // It is created automatically by the DEFINE_HELPERS macro, for every Nifty class.
+    // nft_core_gather returns an array of handles to every instance of a class.
+    //
+    // WARNING - nft_core_gather will return handles to objects that have
+    // been created, but are not fully initialized, so you must be careful!
+    // This call is helpful for development, testing and debugging,
+    // but you should probably avoid using it in production code.
+    //
     // To demonstrate how this works, we first create ten nft_string instances.
     const char * words[] = { "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", NULL };
     for (int i = 0; words[i] ; i++ ) nft_string_new(words[i]);
 
     // Get an array of handles for all current nft_string instances.
     // Even if there are no live strings, you will still get an empty array,
-    // but nft_string_gather will return NULL if memory is exhausted.
-    nft_string_h * handles = nft_string_gather();
+    // but nft_core_gather will return NULL if memory is exhausted.
+    //
+    nft_handle * handles = nft_core_gather(nft_string_class);
     if (handles) {
 	// Iterate over the array, which is terminated by a NULL handle.
 	for (int i = 0; handles[i]; i++) nft_string_print(handles[i]);

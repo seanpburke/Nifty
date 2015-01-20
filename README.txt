@@ -385,14 +385,17 @@ always look like this:
         nft_core_discard(pointer);
     }
 
-In the example above, the pointer returned by nft_core_lookup is really an
-instance of nft_string. To be type safe, We must use nft_string_cast to safely
-typecast the nft_core *, and we need to pass &pointer->core to nft_core_discard:
+To be type safe when working with subclasses of nft_core, we must use 
+type-safe casting. Using our nft_string example, we cast the nft_core*
+to a nft_string* before using nft_string calls:
 
-    nft_string * pointer = nft_string_cast(nft_core_lookup(handle));
-    if (pointer) {
-        ...
-        nft_core_discard(&pointer->core);
+    nft_core * core = nft_core_lookup(handle);
+    if (core) {
+        nft_string * string = nft_string_cast(core);
+        if (string) {
+	   nft_string_print(string);
+        }
+        nft_core_discard(core);
     }
 
 We can use macros to create type-safe wrappers that clean up the code above.
@@ -404,19 +407,22 @@ so that we can have strong static type-checking on handles:
 Now, define a simple wrapper function to cast a nft_string object's handle
 to type nft_string_h:
 
-    nft_string_h nft_string_handle(const nft_string * string) {
+    nft_string_h nft_string_handle(const nft_string * string)
+    {
         return (nft_string_h) string->core.handle;
     }
 
 Next, a wrapper for nft_core_lookup in the same style:
 
-    nft_string * nft_string_lookup(nft_string_h handle) {
+    nft_string * nft_string_lookup(nft_string_h handle)
+    {
         return nft_string_cast(nft_core_lookup(handle));
     }
 
 And, a wrapper for nft_core_discard:
 
-    void nft_string_discard(nft_string * string) {
+    void nft_string_discard(nft_string * string)
+    {
         nft_core_discard(&string->core);
     }
 
@@ -427,7 +433,7 @@ our example fragment can be coded much more cleanly:
     nft_string * object = nft_string_lookup(handle);
     if (object != NULL) {
         ...
-	nft_string_discard(object);
+        nft_string_discard(object);
     }
 
 These wrapper functions can easily be defined via macros. For example,
@@ -442,7 +448,7 @@ subclass * subclass##_cast(void * vp) { return nft_core_cast(vp, subclass##_clas
 
 
 Finally, we gather all these macros into two convenience macros,
-which provide type-safe wrappers for the five basic perations
+which provide type-safe wrappers for the four basic operations
 that all subclasses derived from nft_core support:
 
 #define NFT_DECLARE_WRAPPERS(subclass) \
@@ -450,18 +456,18 @@ NFT_TYPEDEF_HANDLE(subclass) \
 NFT_DECLARE_CAST(subclass)   \
 NFT_DECLARE_HANDLE(subclass) \
 NFT_DECLARE_LOOKUP(subclass) \
-NFT_DECLARE_DISCARD(subclass) \
-NFT_DECLARE_GATHER(subclass)
+NFT_DECLARE_DISCARD(subclass)
 
 #define NFT_DEFINE_WRAPPERS(subclass) \
 NFT_DEFINE_CAST(subclass)    \
 NFT_DEFINE_HANDLE(subclass)  \
 NFT_DEFINE_LOOKUP(subclass)  \
-NFT_DEFINE_DISCARD(subclass) \
-NFT_DEFINE_GATHER(subclass)
+NFT_DEFINE_DISCARD(subclass)
 
-These macros are all defined in nft_core.h. Using them, the entire
-implementation of our nft_string class consists of the following:
+Note the first group creates function prototypes, while the second
+group creates the implementations. These macros are all defined in
+nft_core.h. Using them, the entire implementation of our nft_string
+class consists of the following:
 
 typedef struct nft_string
 {
