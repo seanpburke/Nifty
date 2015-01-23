@@ -1,16 +1,16 @@
 /***********************************************************************
  * (C) Copyright Xenadyne, Inc. 2003-2015  All rights reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software for
- * any purpose and without fee is hereby granted, provided that the 
+ * any purpose and without fee is hereby granted, provided that the
  * above copyright notice appears in all copies.
- * 
- * XENADYNE INC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, 
- * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.  
- * IN NO EVENT SHALL XENADYNE BE LIABLE FOR ANY SPECIAL, INDIRECT OR 
- * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM THE 
- * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, 
- * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN 
+ *
+ * XENADYNE INC DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
+ * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.
+ * IN NO EVENT SHALL XENADYNE BE LIABLE FOR ANY SPECIAL, INDIRECT OR
+ * CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM THE
+ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+ * NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  ************************************************************************
@@ -25,10 +25,11 @@
  * API description, please refer to the header file nft_rbtree.h.
  * Usage is illustrated by the unit test below (see #ifdef MAIN).
  *
- * This package illustrates the design approach where you take a 
+ * This package illustrates the design approach where you take a
  * traditional C package and "wrap" it with Nifty handle-based APIs,
- * while retaining the option to use the tradional direct APIs.
- * Plus, it is a really handy package.
+ * while retaining the option to use the traditional direct API.
+ * This package has many uses that do not entail shared access,
+ * where locking would be unnecessary overhead.
  *
  * DUPLEX KEYS
  *
@@ -37,7 +38,7 @@
  * duplex tree, you simply provide a comparison function that takes
  * four parameters: int (*compare)(key1, key2, data1, data2). When
  * you search a duplex tree, you must initialize the data parameter.
- * 
+ *
  *******************************************************************
  */
 #include <assert.h>
@@ -52,41 +53,54 @@
 NFT_DEFINE_WRAPPERS(nft_rbtree,)
 
 
-// The NIL node pointer points to tree->nil.
-#define	NIL(t)	(&(t)->nil)
+// Define some macros for common operations on the tree.
+// This makes it easier to modify the structure of nodes.
+// For convenience, these macros assume that nft_rbtree * tree
+// and nft_rbnode * nodes are available in the context.
+
+// The first node in struct nft_rbree.nodes[] is used as a sentinel node,
+// which we refer to as NIL.
+#define	   NIL(t)	0
+#define IS_NIL(n)	(NIL(tree) == (n))
 
 // The root node is stored as the left child of the sentinel.
-#define ROOT(t) (t)->nil.child[0]
+#define ROOT(t)		t->nodes[NIL(t)].child[0]
 
 // macros to reference left and right child nodes.
-#define LEFT	child[0]
-#define RIGHT	child[1]
+#define LEFT(n)		nodes[n].child[0]
+#define RIGHT(n)	nodes[n].child[1]
+#define CHILD(n,w)	nodes[n].child[w]
 
-// The least significant bit of the parent pointer stores the color
-// (red or black) of the edge from the node's parent.
+// macros to manipulate the parent field assume that a local
+// struct nft_rbnode * node variable that is a copy of tree->nodes.
 //
-#define	PARENT(n)	((nft_rbnode *)   ((long) (n)->parent & ~3))
-#define SET_PARENT(n,p) (n->parent = (((long) (n)->parent &  3) | (long) p))
+#define	PARENT(n)	nodes[n].parent
+#define SET_PARENT(n,p) nodes[n].parent = p
 
-#define RED(n)		(n->parent &   1)
-#define SET_RED(n)	(n->parent |=  1, assert(n != NIL(tree)) )
-#define RESET_RED(n)	(n->parent &= ~1)
+// macros to manipulate the red bit assume that 'nodes' is defined.
+//
+#define RED(n)		(nodes[n].red != 0)
+#define SET_RED(n)	(nodes[n].red  = 1)
+#define RESET_RED(n)	(nodes[n].red  = 0)
+
+// and just to fill things out...
+#define KEY(n)		nodes[n].key
+#define DATA(n)		nodes[n].data
 
 
 
 /* Returns the first node in tree, or NULL if empty.
  */
-static nft_rbnode *
-node_first(nft_rbtree *tree)
+static unsigned
+node_first(nft_rbtree * tree)
 {
-    nft_rbnode * node = ROOT(tree);
+    unsigned node = ROOT(tree);
+    if (IS_NIL(node))
+	return NIL(tree);
 
-    if (node == NIL(tree))
-	return NULL;
-
-    // If tree is not empty, go to the leftmost node in the tree.
-    while (node->LEFT != NIL(tree))
-	node = node->LEFT;
+    // Go to the leftmost node in the tree.
+    nft_rbnode * nodes = tree->nodes;
+    while (!IS_NIL(LEFT(node)))	node = LEFT(node);
 
     return node;
 }
@@ -99,82 +113,84 @@ node_first(nft_rbtree *tree)
  * 1>   The leftmost node of the right-hand subtree of
  *	the current node, or if there is no right subtree:
  *
- * 2>   The first ancestor node for which the current 
- *	node is a member of the left-hand subtree. In 
+ * 2>   The first ancestor node for which the current
+ *	node is a member of the left-hand subtree. In
  *	other words, we ascend until we get to a left-hand
  *	child node, and return the parent.
  *
  * Returns successor node, or NULL if none.
  */
-static nft_rbnode *
-node_successor(nft_rbtree *tree, nft_rbnode * node)
+static unsigned
+node_successor(nft_rbtree * tree, unsigned node)
 {
     assert(node != NIL(tree));
-    assert((node - tree->nodes) >= 0);
-    assert((node - tree->nodes) <  tree->num_nodes);
-    
-    if (node->RIGHT != NIL(tree))
+    assert(node  < tree->num_nodes);
+
+    nft_rbnode * nodes = tree->nodes;
+
+    if (!IS_NIL(RIGHT(node)))
     {
-	node = node->RIGHT;
-	while (node->LEFT != NIL(tree))	node = node->LEFT;
+	for (node  = RIGHT(node);
+	     !IS_NIL(LEFT(node));
+	     node  = LEFT(node));
 	return node;
     }
     else
     {
-	nft_rbnode * parent;
-
-	while (((parent = PARENT(node)) != NIL(tree)) && (parent->RIGHT == node))
+	unsigned parent;
+	while ((!IS_NIL(parent = PARENT(node))) && (node == RIGHT(parent)))
 	    node = parent;
-
-	return ((parent != NIL(tree)) ? parent : NULL);
+	return parent;
     }
 }
 
 
-/*************** insertion and balancing functions **********************/
+/*_______________________________ insertion and balancing functions _____________________________ */
 
 
 /* Attach a new leaf node. Note that the caller must ensure that
  * tree->next_free < tree->num_nodes, by calling rbtree_resize().
  */
-static nft_rbnode *
-attach_leaf(nft_rbtree *tree, nft_rbnode *parent, void *key, void *data, int which)
+static unsigned
+attach_leaf(nft_rbtree * tree, unsigned parent, void *key, void *data, int which)
 {
+    assert(tree->next_free > 0);
     assert(tree->next_free < tree->num_nodes);
 
-    nft_rbnode * node = &tree->nodes[tree->next_free++];
+    nft_rbnode * nodes = tree->nodes;
+    unsigned     node  = tree->next_free++ ;
 
-    *node = (nft_rbnode) { { NIL(tree), NIL(tree) }, (long)parent, key, data };
+    nodes[node] = (nft_rbnode) {  key, data, { NIL(tree), NIL(tree) }, parent, 0 };
 
-    parent->child[which] = node;
+    CHILD(parent,which) = node;
 
     return node;
 }
-
 
 /* Rotate the tree so that grandson gs is promoted and the son s is demoted.
  * If gs is a left child, this will do a right rotate, otherwise a left-rotate.
  */
 static void
-rotate(nft_rbnode *node, nft_rbnode *s, nft_rbnode *gs)
+rotate(nft_rbnode * nodes, unsigned node, unsigned s, unsigned gs)
 {
-    int left  = (gs == s->LEFT) ? 0 : 1;
+    int left  = (gs == LEFT(s)) ? 0 : 1;
     int right = left ^ 1;
 
     // Promote gs and demote s while maintaining the tree ordering.
-    s->child[left] = gs->child[right];
-    SET_PARENT(gs->child[right], s);
-    gs->child[right]= s;
-    SET_PARENT(s, gs);
+    CHILD(s, left) = CHILD(gs, right);
+    PARENT(CHILD(gs, right)) = s;
+    CHILD(gs, right) = s;
+    PARENT(s) = gs;
 
     // Put gs where s used to be.
-    if (s == node->LEFT) node->LEFT  = gs;
-    else                 node->RIGHT = gs;
-    SET_PARENT(gs, node);
+    if (s == LEFT(node)) LEFT(node)  = gs;
+    else                 RIGHT(node) = gs;
+
+    PARENT(gs) = node;
     return;
 }
 
-/* This is an insert-fixup procedure, derived from the algorithm 
+/* This is an insert-fixup procedure, derived from the algorithm
  * presented in Cormen, Leiserson and Rivest, p268.
  *
  * However, we employ a trick here to exploit the symmetry of
@@ -185,15 +201,18 @@ rotate(nft_rbnode *node, nft_rbnode *s, nft_rbnode *gs)
  * that left == right ^ 1.
  */
 static void
-insert_fixup(nft_rbtree *tree, nft_rbnode * x)
+insert_fixup(nft_rbtree * tree, unsigned x)
 {
+    nft_rbnode * nodes = tree->nodes;
+
     while ((x != ROOT(tree)) && RED(PARENT(x)))
     {
-	nft_rbnode * p  = PARENT(x);
-	nft_rbnode * gp = PARENT(p);
-	int	 right = (p == gp->LEFT) ? 1 : 0 ;
-	nft_rbnode * y  = gp->child[right];
-	  
+	unsigned p  = PARENT(x);
+	unsigned gp = PARENT(p);
+	int	 right = (p == LEFT(gp)) ? 1 : 0 ;
+	int      left  = right ^ 1 ;
+	unsigned y  = CHILD(gp, right);
+
 	if (RED(y)) {
 	    RESET_RED(y);
 	    RESET_RED(p);
@@ -201,16 +220,16 @@ insert_fixup(nft_rbtree *tree, nft_rbnode * x)
 	    x = gp;
 	}
 	else {
-	    if (x == p->child[right])
+	    if (x == CHILD(p, right))
 	    {
-		rotate(gp, p, x);
-		x = x->child[right ^ 1]; /* left */
-		p = PARENT(x);
-		gp= PARENT(p);
+		rotate(nodes, gp, p, x);
+		x  = CHILD(x, left);
+		p  = PARENT(x);
+		gp = PARENT(p);
 	    }
 	    RESET_RED(p);
 	    SET_RED(gp);
-	    rotate(PARENT(gp), gp, p);
+	    rotate(nodes, PARENT(gp), gp, p);
 	}
     }
     RESET_RED(ROOT(tree));
@@ -224,13 +243,15 @@ insert_fixup(nft_rbtree *tree, nft_rbnode * x)
 static void
 insert_node(nft_rbtree *tree, void *key, void *data)
 {
-    nft_rbnode * x = ROOT(tree);
-    nft_rbnode * node;
-    int	   (*compare)() = tree->compare;	
-    int      c;
+    nft_rbnode * nodes  = tree->nodes;
+    int	   (*compare)() = tree->compare;
 
     // This never gets called on an empty tree.
-    assert  (ROOT(tree) != NIL(tree));
+    assert(!IS_NIL(ROOT(tree)));
+
+    unsigned x = ROOT(tree);
+    unsigned node;
+    int      c;
 
     // Find the node to which to attach the new leaf.
     do {
@@ -239,14 +260,14 @@ insert_node(nft_rbtree *tree, void *key, void *data)
 	/* Provide four parameters to comparison function to support duplex keys.
 	 * A simple comparison function can ignore the last two parameters.
 	 */
-	c = compare(key, node->key, data, node->data);
+	c = compare(key, KEY(node), data, DATA(node));
 
-	x = (c < 0) ? node->LEFT : node->RIGHT ;
+	x = (c < 0) ? LEFT(node) : RIGHT(node) ;
 
-    } while (x != NIL(tree));
+    } while (!IS_NIL(x));
 
     // Attach a new leaf under node, and rebalance the tree.
-    nft_rbnode * leaf = attach_leaf(tree, node, key, data, c >= 0 );
+    unsigned leaf = attach_leaf(tree, node, key, data, c >= 0 );
     SET_RED(leaf);
     insert_fixup(tree, leaf);
     return;
@@ -263,53 +284,54 @@ insert_node(nft_rbtree *tree, void *key, void *data)
  * that left == right ^ 1.
  */
 static void
-delete_fixup(nft_rbtree * tree, nft_rbnode * x)
+delete_fixup(nft_rbtree * tree, unsigned x)
 {
-    nft_rbnode  * w;
+    nft_rbnode * nodes  = tree->nodes;
 
+    unsigned w;
     while ((x != ROOT(tree)) && !RED(x))
     {
-	nft_rbnode  * p = PARENT(x);
+	unsigned p = PARENT(x);
 
 	// If x is the left child, use normal left/right, otherwise flip...
-	int right = (x == p->LEFT) ? 1 : 0;
-	w = p->child[right];
+	int right = (x == LEFT(p)) ? 1 : 0;
+	w = CHILD(p, right);
 	assert(w != NIL(tree));
 
 	if (RED(w)) {
 	    RESET_RED(w);
 	    SET_RED(p);
-	    rotate(PARENT(p), p, w);
-	    w = p->child[right];
+	    rotate(nodes, PARENT(p), p, w);
+	    w = CHILD(p, right);
 	    assert(w != NIL(tree));
 	}
 
 	// w is now black. If both children are also black...
-	if (!RED(w->LEFT) && !RED(w->RIGHT))
+	if (!RED(LEFT(w)) && !RED(RIGHT(w)))
 	{
 	    SET_RED(w);
 	    x = p;
 	}
 	else
 	{
-	    if (!RED(w->child[right])) // right child black, left child is red
+	    if (!RED(CHILD(w,right))) // right child black, left child is red
 	    {
 		int left  = right ^ 1;
 
-		RESET_RED(w->child[left]);
+		RESET_RED(CHILD(w, left));
 		SET_RED(w);
-		rotate(p, w, w->child[left]);
-		w = p->child[right];
+		rotate(nodes, p, w, CHILD(w, left));
+		w = CHILD(p, right);
 		assert(w != NIL(tree));
 	    }
-	    // Now the right child is red, and the left black 
+	    // Now the right child is red, and the left black
 	    if (RED(p))
 		SET_RED(w);
 	    else
 		RESET_RED(w);
 	    RESET_RED(p);
-	    RESET_RED(w->child[right]);
-	    rotate(PARENT(p), p, w);
+	    RESET_RED(CHILD(w, right));
+	    rotate(nodes, PARENT(p), p, w);
 	    x = ROOT(tree);
 	    break;
 	}
@@ -321,8 +343,8 @@ delete_fixup(nft_rbtree * tree, nft_rbnode * x)
 /* Here is the RB-Delete procedure from C,L&R.
  * To delete the node z, we handle two cases:
  *
- * 1. If either of the node's subtrees is empty, we promote the 
- *    other child into node's place, thereby raising the whole 
+ * 1. If either of the node's subtrees is empty, we promote the
+ *    other child into node's place, thereby raising the whole
  *    child's subtree. If the other child is Nil, no problem.
  *
  * 2. If z has two children, we find z's successor node y, copy
@@ -331,32 +353,31 @@ delete_fixup(nft_rbtree * tree, nft_rbnode * x)
  *    (You can show that if a node has two children, then its
  *    successor can have no left child, and its predecessor can
  *    have no right child.)
- * 
+ *
  * If the node that is deleted in case 1 is black, then we call
  * the procedure delete_fixup() to restore tree balance.
- * 
+ *
  * We also do some tricks with the tree->current pointer
  * so that tree walks won't be disturbed by the deletion.
  */
 static void
-delete_node(nft_rbtree * tree, nft_rbnode * z)
+delete_node(nft_rbtree * tree, unsigned z)
 {
-    nft_rbnode * p = NULL;
-    nft_rbnode * x = NULL;
-    nft_rbnode * y = NULL;
-
     assert(z != NIL(tree));
-  
-    /* y is the node that we will remove from the tree.
-     * y will have at least one Nil child, so that we
-     * can splice y out by promoting the other child.
-     */
-    if (z->LEFT == NIL(tree) || z->RIGHT == NIL(tree))
+
+    nft_rbnode * nodes = tree->nodes;
+    unsigned p = NULL;
+    unsigned x = NULL;
+    unsigned y = NULL; // y is the node that we will remove from the tree.
+
+
+    if (IS_NIL(LEFT(z)) || IS_NIL(RIGHT(z)))
     {
+	// y has at least one Nil child, so we can splice y out by promoting the other child.
 	y = z;
-	
-	// If z was to be the next walk node, increment the walk to z's successor. 
-	if (tree->current == y)    
+
+	// If z was to be the next walk node, increment the walk to z's successor.
+	if (tree->current == y)
 	    tree->current = node_successor(tree, y);
     }
     else
@@ -365,29 +386,29 @@ delete_node(nft_rbtree * tree, nft_rbnode * z)
 	 * and remove the successor.
 	 */
 	y = node_successor(tree, z);
-	z->key  = y->key;
-	z->data = y->data;
+	KEY(z)  = KEY(y);
+	DATA(z) = DATA(y);
 
 	/* If y was to be the next walk node, set the tree walk pointer to z,
 	 * as that is where y's key/data are now.
 	 */
-	if (tree->current == y)    
+	if (tree->current == y)
 	    tree->current  = z;
     }
-    assert(y != NIL(tree));
+    assert(!IS_NIL(y));
 
     // x is the child of y that we will promote into y's place.  x could be the Nil node.
-    x = (y->LEFT != NIL(tree)) ? y->LEFT : y->RIGHT;
+    x = (!IS_NIL(LEFT(y))) ? LEFT(y) : RIGHT(y) ;
 
     // To promote x, set its parent pointer to y's parent.
     p = PARENT(y);
     SET_PARENT(x, p);
 
     // Set the appropriate child pointer in p to x.
-    if (p->LEFT == y)
-	p->LEFT  = x;
+    if (LEFT(p) == y)
+	LEFT(p)  = x;
     else
-	p->RIGHT = x;
+	RIGHT(p) = x;
 
     // Balance the tree if we deleted a black node.
     if (!RED(y)) delete_fixup(tree, x);
@@ -396,21 +417,21 @@ delete_node(nft_rbtree * tree, nft_rbnode * z)
      * tree->next_free indicates the next free node, we have to copy the
      * node at (tree->next_free - 1) into y and then decrement next_free.
      */
-    z = &tree->nodes[--tree->next_free];
+    z = --tree->next_free;
     if (y != z)
     {
-	*y = *z;
+	nodes[y] = nodes[z];
 
 	// Switch parent pointers in z's children to point to y.
-	SET_PARENT(z->LEFT,  y);
-	SET_PARENT(z->RIGHT, y);
+	SET_PARENT(LEFT(z),  y);
+	SET_PARENT(RIGHT(z), y);
 
 	// Switch the child pointer in z's parent to point to y.
 	p = PARENT(z);
-	if (p->LEFT == z)
-	    p->LEFT  = y;
+	if (LEFT(p) == z)
+	    LEFT(p)  = y;
 	else
-	    p->RIGHT = y;
+	    RIGHT(p) = y;
 
 	// If z was current walk node, switch it to y.
 	if (tree->current == z)
@@ -425,38 +446,16 @@ delete_node(nft_rbtree * tree, nft_rbnode * z)
 static int
 resize_nodes(nft_rbtree *tree, int new_size)
 {
-    assert(new_size >= tree->next_free);
+    assert(new_size > tree->next_free);
 
     // Attempt to realloc the nodes array to the new size.
     nft_rbnode * new_nodes = realloc(tree->nodes, new_size * sizeof(nft_rbnode));
 
-    if (!new_nodes) return 0;
+    if (new_nodes == 0) return 0;
 
-    if (new_size == 0)
-    {
-	// If new_size is zero, realloc behaves like free.
-	new_nodes = NULL;
-    }
-    else if (new_nodes != tree->nodes)
-    {
-	// If realloc moved the nodes array, adjust all the tree pointers.
-	long offset = new_nodes - tree->nodes;
-	for (int  i = 0; i < tree->next_free; i++)
-	{
-	    nft_rbnode * n = &new_nodes[i];
+    // If new_size is zero, realloc behaves like free.
+    if (new_size  == 0) new_nodes = NULL;
 
-	    if (n->LEFT  != NIL(tree)) n->LEFT   += offset;
-	    if (n->RIGHT != NIL(tree)) n->RIGHT  += offset;
-	    if (PARENT(n)!= NIL(tree)) n->parent += offset * sizeof(nft_rbnode);
-	}
-	// Offset the tree root pointer.
-	if (ROOT(tree) != NIL(tree)) ROOT(tree) += offset;
-
-	// Also offset the walk pointer, if set.
-	if (tree->current != NULL    &&
-	    tree->current != NIL(tree))
-	    tree->current += offset;
-    }
     tree->nodes     = new_nodes;
     tree->num_nodes = new_size;
 
@@ -488,7 +487,7 @@ rbtree_create (const char * class, size_t size, int min_nodes, int (*compare)() 
      * this causes us not to allocate any nodes until an insert is done.
      */
     if (min_nodes < 0) return NULL;
-    
+
     // The compare arg is mandatory.
     if (!compare) return NULL;
 
@@ -507,18 +506,14 @@ rbtree_create (const char * class, size_t size, int min_nodes, int (*compare)() 
 
     // Initialize the other tree data.
     tree->core.destroy = rbtree_destroy;
+    tree->compare   = compare;
     tree->min_nodes = min_nodes;
     tree->num_nodes = min_nodes;
-    tree->next_free = 0;
-    tree->compare   = compare;
-    tree->current   = NULL;
+    tree->next_free = 1; // remember that the zeroth node is our sentinel
+    tree->current   = 0;
 
-    // Initialize the tree root. NIL is the empty node.
-    ROOT(tree) = NIL(tree);
-
-    // Set the NIL node's parent pointer to itself.
-    // There is no need to use SET_PARENT in this case.
-    NIL(tree)->parent = (long) NIL(tree);
+    // Initialize the sentinel
+    tree->nodes[0]  = (nft_rbnode) { 0 };
 
     pthread_rwlock_init(&tree->rwlock, NULL);
 
@@ -572,7 +567,7 @@ rbtree_insert(nft_rbtree *tree,  void * key,  void * data)
     }
 
     // The first node in an empty tree is made the left child of NIL.
-    if (tree->next_free == 0)
+    if (tree->next_free == 1)
 	attach_leaf(tree, NIL(tree), key, data, 0);
     else
 	insert_node(tree, key, data);
@@ -587,27 +582,28 @@ rbtree_insert(nft_rbtree *tree,  void * key,  void * data)
  *
  *-----------------------------------------------------------------------------
  */
-int 
+int
 rbtree_delete(nft_rbtree * tree,  void *key,  void **data)
 {
-    int		(*compare)();
-    void	 *tok = data ? *data : NULL;
-    nft_rbnode       *node;
-    int   	  c = -1;
-
     if ( tree == NULL) return 0;
 
-    compare = tree->compare;
+    int		(*compare)() = tree->compare;
+    nft_rbnode   *nodes      = tree->nodes;
+    void	 *token = data ? *data : NULL;
+    unsigned      node;
+    int   	  c = -1;
 
     // Find the given key.
     for (node = ROOT(tree);
-	 (node != NIL(tree) && (c = compare(key, node->key, tok, node->data)) != 0);
-	 node = (c < 0) ? node->LEFT : node->RIGHT);
+	 node != NIL(tree) && (c = compare(key, KEY(node), token, DATA(node)));
+	 node = (c < 0) ? LEFT(node) : RIGHT(node) );
 
     // If the key is found, store the data and delete node.
-    if (c == 0) 
+    if (c == 0)
     {
-	if (data) *data = node->data;
+	assert(!IS_NIL(node));
+
+	if (data) *data = DATA(node);
 
 	delete_node(tree, node);
 
@@ -631,25 +627,24 @@ rbtree_delete(nft_rbtree * tree,  void *key,  void **data)
 int
 rbtree_search(nft_rbtree *tree, void *key, void  **data)
 {
-    int	       (*compare)();
-    void	*tok = data ? *data : NULL;
-    nft_rbnode	*node;
-    int		 c = -1;
-
     if ( tree == NULL) return 0;
 
-    compare = tree->compare;
+    int	       (*compare)() = tree->compare;
+    nft_rbnode  *nodes      = tree->nodes;
+    void	*token = data ? *data : NULL;
+    unsigned	 node;
+    int		 comp = -1;
 
     // Find the given key.
     for (node = ROOT(tree);
-	 (node != NIL(tree) && (c = compare(key, node->key, tok, node->data)) != 0);
-	 node = (c < 0) ? node->LEFT : node->RIGHT);
+	 node != NIL(tree) && (comp = compare(key, KEY(node), token, DATA(node)));
+	 node = (comp < 0) ? LEFT(node) : RIGHT(node) );
 
-    // Return data if key found. 
-    if ((c == 0) && data)
-	*data = node->data;
+    // Return data if key found.
+    if ((comp == 0) && data)
+	*data = DATA(node);
 
-    return (c == 0);
+    return (comp == 0);
 }
 
 /*-----------------------------------------------------------------------------
@@ -663,22 +658,21 @@ rbtree_search(nft_rbtree *tree, void *key, void  **data)
 int
 rbtree_replace(nft_rbtree *tree, void *key, void *data)
 {
-    int		(*compare)();
-    nft_rbnode	 *node;
-    int		  c = -1;
-
     if ( tree == NULL) return 0;
 
-    compare = tree->compare;
+    int	       (*compare)() = tree->compare;
+    nft_rbnode  *nodes      = tree->nodes;
+    unsigned     node;
+    int c = -1;
 
     // Find the given key.
     for (node = ROOT(tree);
-	 (node != NIL(tree) && (c = compare(key, node->key, data, node->data)) != 0);
-	 node = (c < 0) ? node->LEFT : node->RIGHT);
+	 node != NIL(tree) && (c = compare(key, KEY(node), data, DATA(node)));
+	 node = (c < 0) ? LEFT(node) : RIGHT(node));
 
     // If key found, change data.
     if (c == 0)
-	node->data = data;
+	DATA(node) = data;
 
     return (c == 0);
 }
@@ -694,7 +688,7 @@ rbtree_count( nft_rbtree * tree)
 {
     if (!tree) return 0;
 
-    return(tree->next_free);
+    return(tree->next_free - 1);
 }
 
 /*-----------------------------------------------------------------------------
@@ -706,17 +700,18 @@ rbtree_count( nft_rbtree * tree)
 int
 rbtree_walk_first_r(nft_rbtree *tree, void  **key, void  **data, void **walk)
 {
-    nft_rbnode * node;
-    int	     result = 0;
-
     if (tree == NULL) return 0;
+
+    nft_rbnode * nodes = tree->nodes;
+    int	         result = 0;
+    unsigned     node;
 
     // If tree is not empty, set *walk to node's successor.
     if ((node = node_first(tree)))
     {
-	if (key)  *key  = node->key;
-	if (data) *data = node->data;
-	*walk = node_successor(tree, node);
+	if (key)  *key  = KEY(node);
+	if (data) *data = DATA(node);
+	*walk  = (void*)(long)node_successor(tree, node);
 	result = 1;
     }
     return result;
@@ -736,17 +731,17 @@ rbtree_walk_first_r(nft_rbtree *tree, void  **key, void  **data, void **walk)
 int
 rbtree_walk_next_r(nft_rbtree *tree, void **key, void **data, void **walk)
 {
-    nft_rbnode * node;
-    int	     result = 0;
+    if (tree == NULL) return 0;
 
-    /* Make sure that this node wasn't deleted during the previous 
-     * iteration. We clear the parent pointer when a node is deleted.
-     */
-    if ((node = (nft_rbnode *) *walk) && (node->parent != 0))
+    nft_rbnode * nodes  = tree->nodes;
+    unsigned     node   = (long) *walk;
+    int	         result = 0;
+
+    if (!IS_NIL(node))
     {
-	if (key)  *key  = node->key;
-	if (data) *data = node->data;
-	*walk = node_successor(tree, node);
+	if (key)  *key  = KEY(node);
+	if (data) *data = DATA(node);
+	*walk  = (void*)(long)node_successor(tree, node);
 	result = 1;
     }
     return result;
@@ -773,7 +768,7 @@ rbtree_walk_first(nft_rbtree *tree, void  **key, void  **data)
  *
  *	rbtree_walk_next	Single threaded walk_next call.
  *
- *	Only one thread may walk a shared tree at a time. 
+ *	Only one thread may walk a shared tree at a time.
  *	The caller must enforce this constraint.
  *	In multithreaded code, use rbtree_walk_first_r(), rbtree_walk_next_r().
  *
@@ -789,7 +784,7 @@ rbtree_walk_next(nft_rbtree *tree, void **key, void **data)
  *	rbtree_apply() - Call a function on every entry in the rb tree.
  *	Return the number of entries in the tree.
  *
- *	Function takes args of (key, data, extra_arg). 
+ *	Function takes args of (key, data, extra_arg).
  *
  *	WARNING - Your function must _NOT_ modify or delete the key,
  *	otherwise the tree will not function correctly.
@@ -797,50 +792,51 @@ rbtree_walk_next(nft_rbtree *tree, void **key, void **data)
  *-----------------------------------------------------------------------------
  */
 int
-rbtree_apply( nft_rbtree * rb,
-		  void (* apply)( void * key, void * obj, void * arg),
-		  void * arg)
+rbtree_apply( nft_rbtree * tree,
+		   void (* apply)( void * key, void * obj, void * arg),
+		    void * arg)
 {
-    nft_rbnode * walk;
-    int      num = 0;
+    if (tree == NULL) return 0;
 
-    if (rb == NULL) return 0;
-    
-    for (walk = node_first(rb);
-	 walk != NULL;
-	 walk = node_successor(rb, walk))
+    nft_rbnode * nodes = tree->nodes;
+    unsigned     node;
+    int          num = 0;
+
+    for (node  = node_first(tree);
+	 node != NIL(tree);
+	 node  = node_successor(tree, node))
     {
 	num++;
-	(*apply)( walk->key, walk->data, arg);
+	(*apply)( KEY(node), DATA(node), arg);
     }
-
     return num;
 }
 
 /********************* tree validation functions ************************/
 
-/* 
+/*
  *  Verify that node pointers point within the allocated node area,
  *  and that parent-child pointer relationships are consistent.
  *  Verify that the red-black node color constraint is satisfied.
  */
 static int
-check_pointers(nft_rbtree *tree, nft_rbnode   *node)
+check_pointers(nft_rbtree *tree, unsigned node)
 {
+    nft_rbnode * nodes = tree->nodes;
+
     if (node != NIL(tree))
     {
-	// Check that node points into the malloc'ed area. 
-	if ((node < tree->nodes) ||
-	    (node >= (tree->nodes + tree->next_free)))
+	// Check that node points into the malloc'ed area.
+	if ((node == 0) || (node >= tree->next_free))
 	{
 	    assert(!"rbtree_validate:Node pointer out of bounds!\n");
 	    return 0;
 	}
-	
+
 	/* Check that parent pointers are consistent
 	 */
-	if ((node->RIGHT != NIL(tree) && PARENT(node->RIGHT) != node) ||
-	    (node->LEFT  != NIL(tree) && PARENT(node->LEFT)  != node))
+	if ((RIGHT(node) != NIL(tree) && PARENT(RIGHT(node)) != node) ||
+	    (LEFT(node)  != NIL(tree) && PARENT(LEFT(node))  != node))
 	{
 	    assert(!"rbtree_validate:Bad parent pointer!\n");
 	    return 0;
@@ -848,17 +844,16 @@ check_pointers(nft_rbtree *tree, nft_rbnode   *node)
 
 	/* If this node is red, both children must be black.
 	 */
-	if (RED(node) && (RED(node->LEFT) || RED(node->RIGHT)))
+	if (RED(node) && (RED(LEFT(node)) || RED(RIGHT(node))))
 	{
 	    assert(!"rbtree_validate:Red-black violation!\n");
 	    return 0;
 	}
-	return(check_pointers(tree, node->LEFT) &&
-	       check_pointers(tree, node->RIGHT));
+	return(check_pointers(tree, LEFT(node)) &&
+	       check_pointers(tree, RIGHT(node)));
     }
     return 1;
 }
-
 
 /*-----------------------------------------------------------------------------
  *
@@ -870,17 +865,16 @@ check_pointers(nft_rbtree *tree, nft_rbnode   *node)
 int
 rbtree_validate( nft_rbtree * tree)
 {
+    nft_rbnode * nodes = tree->nodes;
     int result = 1;
 
-    // The Nil node should never be colored red, and it should never be on the freelist.
+    // The Nil node should never be colored red.
     assert(!RED((NIL(tree))));
 
     // The walk pointer should never point to a free node.
-    assert(!tree->current ||
-	   ((tree->current >= tree->nodes) &&
-	    (tree->current < (tree->nodes + tree->next_free))));
+    assert(tree->current < tree->next_free);
 
-    if (PARENT(ROOT(tree)) != NIL(tree))
+    if (!IS_NIL(PARENT(ROOT(tree))))
     {
 	assert(!"Root node parent != NIL\n");
 	result = 0;
@@ -892,17 +886,17 @@ rbtree_validate( nft_rbtree * tree)
 	void 	*prevkey  = NULL;
 	void	*prevdata = NULL;
 	int	 first    = 1;
-	nft_rbnode	*node;
+	unsigned node;
 
 	for (node = node_first(tree); node;  node = node_successor(tree, node))
 	{
-	    if (!first && compare(node->key, prevkey, node->data, prevdata) < 0)
+	    if (!first && compare(KEY(node), prevkey, DATA(node), prevdata) < 0)
 	    {
 		assert(!"rbtree_validate: Key order violation!\n");
 		result = 0;
 	    }
-	    prevkey  = node->key;
-	    prevdata = node->data;
+	    prevkey  = KEY(node);
+	    prevdata = DATA(node);
 	    first    = 0;
 	}
     }
@@ -911,7 +905,6 @@ rbtree_validate( nft_rbtree * tree)
 
     return result;
 }
-
 
 /******************************************************************************/
 /*******								*******/
@@ -925,32 +918,11 @@ rbtree_validate( nft_rbtree * tree)
  * with or without locking, depending on your needs.
  */
 
-/*-----------------------------------------------------------------------------
- *
- * nft_rbtree_new	Create a new nft_rbtree
- *
- * PARAMETERS	min_size - initial number of nodes to allocate
- *		compare  - key comparison predicate function 
- *
- * RETURNS      Handle of type nft_rbtree_h
- *
- *-----------------------------------------------------------------------------
- */
 nft_rbtree_h
 nft_rbtree_new(int min_nodes, int (*compare)() )
 {
     return nft_rbtree_handle(rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), min_nodes, compare));
 }
-
-/*-----------------------------------------------------------------------------
- *
- * nft_rbtree_free	Release the nft_rbtree's handle and memory.
- *
- * RETURNS      EINVAL if the handle is invalid, otherwise zero.
- *		If you see EINVAL, you are probably freeing twice.
- *
- *-----------------------------------------------------------------------------
- */
 int
 nft_rbtree_free(nft_rbtree_h h)
 {
@@ -961,12 +933,12 @@ nft_rbtree_free(nft_rbtree_h h)
 	// Double-discard, to release the reference returned from rbtree_create().
 	if ((result = nft_rbtree_discard(rbtree)) == 0)
 	     result = nft_rbtree_discard(rbtree);
+
+	// This assert should never fail.
+	assert(result == 0);
     }
     return result;
 }
-
-
-
 int
 nft_rbtree_count(nft_rbtree_h h)
 {
@@ -1147,33 +1119,109 @@ nft_rbtree_apply(nft_rbtree_h h, RBTREE_APPLY apply, void * arg)
 #undef NDEBUG  // Assertions must be active in test code.
 #endif
 #include <assert.h>
-#include <time.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/times.h>
-#include <sys/resource.h>
-
-/*
- * Store a set of strings that we will use to test this package.
- */
-#define MAXKEYS 200000
-char   *keys[MAXKEYS];
-int	nkeys = 0;
-
 
 /* Print indented tree */
-void print_tree(nft_rbtree * tree, nft_rbnode * node, int depth)
+void print_tree(nft_rbtree * tree, unsigned node, int depth)
 {
+    nft_rbnode * nodes = tree->nodes;
+
     if (node != NIL(tree))
     {
-	print_tree(tree, node->LEFT, depth + 1);
+	print_tree(tree, LEFT(node), depth + 1);
 	for (int i = 0; i < depth; i++) putchar('	');
-	printf("%c:%s\n", (RED(node) ? 'R' : 'B'), (char *) node->key);
-	print_tree(tree, node->RIGHT, depth + 1);
+	printf("%c:%s\n", (RED(node) ? 'R' : 'B'), (char *) KEY(node));
+	print_tree(tree, RIGHT(node), depth + 1);
     }
 }
 
+
+static void
+test_basic(void)
+{
+    int    testn    = 20;
+    char * test[20] = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+                           "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" };
+    void * key, * data;
+
+    printf("\nTesting basic operations\n");
+
+    nft_rbtree * t = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 10, strcmp);
+
+    for (int i = 0; i < 10; i++)
+	rbtree_insert(t, test[i], test[i]);
+
+    assert(rbtree_validate(t));
+
+    for (int i = 0; i < 10; i++) {
+	assert(rbtree_search(t, test[i], (void**) &data));
+	assert(data == test[i]);
+    }
+
+    for (int i = 0; i < 10; i++)
+	assert(rbtree_replace(t, test[i], test[i]));
+
+
+    for (int i = 0, result = rbtree_walk_first(t, (void**) &key, (void**) &data);
+	 result;
+	 i++,       result = rbtree_walk_next (t, (void**) &key, (void**) &data))
+    {
+	assert(key  == test[i]);
+	assert(data == test[i]);
+    }
+
+    for (int i = 0; i < 10; i++) {
+	assert(rbtree_delete(t, test[i], (void**) &data));
+	assert(data == test[i]);
+    }
+
+    {	/* This loop randomly inserts and deletes keys, while running the validator.
+	 */
+	void * lastkey = NULL;
+	int limit = 10 * testn ;
+	int j     = 0;
+
+	srand48(time(0));	/* seed the random number generator */
+
+	rbtree_walk_first(t, &lastkey, NULL);
+
+	for (int i = 0; i < limit; i++)
+	{
+	    assert(rbtree_count(t) == j);
+
+	    int slot = lrand48() % testn;
+
+	    if (rbtree_search(t, test[slot], &data)) {
+		rbtree_delete(t, test[slot], 0);
+		assert( data  == test[slot] );
+		j--;
+	    }
+	    else {
+		rbtree_insert(t, test[slot], test[slot]);
+		j++;
+	    }
+	    rbtree_validate(t);
+
+	    /* To increase stress, do a walk while everything else is going on.
+	     */
+	    if (rbtree_walk_next(t, &key, NULL) == 0)
+		rbtree_walk_first(t, &lastkey, NULL);
+	    else {
+		if (strcmp((char *) lastkey, (char *) key) >= 0)
+		    printf("\nWalk generated keys in wrong order: %s -> %s\n", (char *) lastkey, (char *) key);
+		lastkey = key;
+	    }
+
+	    if (0) { // it can be fun to watch the tree evolve
+		puts("--------------------------------------------------------");
+		print_tree(t, ROOT(t), 0);
+	    }
+	}
+    }
+    int result = nft_rbtree_discard(t);
+    assert(0 == result);
+}
 
 static int
 strcmp_duplex(char *key1, char *key2, char *tok1, char *tok2)
@@ -1188,6 +1236,8 @@ static void
 test_duplex_keys(void)
 {
     char * test[10] = { "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten" };
+
+    printf("\nTesting with a duplex comparator\n");
 
     nft_rbtree * u = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 10, strcmp_duplex);
 
@@ -1211,23 +1261,31 @@ test_duplex_keys(void)
     assert(0 == result);
 }
 
+
+
+/*
+ * Store a set of strings that we will use to test this package.
+ */
+#define MAXKEYS 500000
+char  * keys[MAXKEYS];
+int	nkeys = 0;
+
+/* Timing stuff.
+ */
+struct timespec mark, done;
+#define MARK	mark = nft_gettime()
+#define TIME	done = nft_gettime()
+#define ELAPSED ((done.tv_sec * 1.0 + done.tv_nsec * 0.000000001) - \
+                 (mark.tv_sec * 1.0 + mark.tv_nsec * 0.000000001)   )
+
+
 static void
 test_private_api(void)
 {
     void       *key, *lastkey = NULL;
     void       *data;
     int		result = 0;
-    int 	i, j;
-
-    /* Timing stuff.
-     */
-    struct tms 	start, done;
-    float	usert, syst;
-    float	tick = 1.0 / sysconf(_SC_CLK_TCK);
-#define MARK	times(&start)
-#define TIME	times(&done); \
-    usert = (done.tms_utime - start.tms_utime) * tick; \
-    syst  = (done.tms_stime - start.tms_stime) * tick
+    int 	i;
 
     printf("\nTesting the pointer-based API\n");
 
@@ -1236,7 +1294,7 @@ test_private_api(void)
      * in order to force a pass thru the offset code in
      * realloc-nodes.
      */
-    nft_rbtree * t = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 
+    nft_rbtree * t = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree),
 				   512, (int (*)(void*, void*)) strcmp);
 
     /* Insert strings into tree  */
@@ -1244,7 +1302,9 @@ test_private_api(void)
     for (i = 0; i < nkeys; i++)
 	rbtree_insert(t, keys[i], 0);
     TIME;			/* compute time usage */
-    printf("Time to insert %d keys: %.2fu %.2fs\n", i, usert, syst);
+    printf("Time to insert %d keys: %.2f\n", i, ELAPSED);
+
+    assert(rbtree_validate(t));
 
     /* Walk the tree */
     MARK;			/* record start time */
@@ -1259,7 +1319,7 @@ test_private_api(void)
     TIME;			/* compute time usage */
     if (i != nkeys)
 	printf("Walk generated only %d keys!\n", i);
-    printf("Time to walk   %d keys: %.2fu %.2fs\n", i, usert, syst);
+    printf("Time to walk   %d keys: %.2f\n", i, ELAPSED);
 
     /* Search all keys */
     MARK;			/* record start time */
@@ -1267,7 +1327,7 @@ test_private_api(void)
 	if (!rbtree_search(t, keys[i], &data))
 	    printf("search: key not found %s\n", keys[i]);
     TIME;			/* compute time usage */
-    printf("Time to search %d keys: %.2fu %.2fs\n", i, usert, syst);
+    printf("Time to search %d keys: %.2f\n", i, ELAPSED);
 
     /* Delete all keys */
     MARK;			/* record start time */
@@ -1277,77 +1337,7 @@ test_private_api(void)
 	    printf("delete: key not found %s\n", keys[i]);
     }
     TIME;			/* compute time usage */
-    printf("Time to delete %d keys: %.2fu %.2fs\n", i, usert, syst);
-
-
-    /* A loop which randomly deletes or inserts the keys.
-     *
-     * nkeys = 1-100: We print the tree at each iteration so you
-     *	can monitor the trees balance retention. We also validate
-     *	the tree after each operation to catch bugs.
-     *
-     * nkeys = 101-1000: In this range we skip print and validition,
-     *	in order to test performance. The tests above just aren't
-     *	sensitive enought to catch subtle performance changes.
-     */
-    if (nkeys <= 1000) 
-    {
-	int limit = (nkeys <= 100) ? 10000*nkeys : 500*nkeys;
-      
-	srand48(time(0));	/* seed the random number generator */
-
-	MARK;
-
-	j = 0;
-
-	rbtree_walk_first(t, &lastkey, NULL);
-
-	for (i = 0; i < limit; i++)
-	{
-	    key = keys[lrand48() % nkeys];
-
-	    if (rbtree_search(t, key, 0))
-	    {
-		rbtree_delete(t, key, 0);
-		j--;
-	    }
-	    else
-	    {
-		rbtree_insert(t, key, 0);
-		j++;
-	    }
-
-	    /* This does a walk within a walk.
-	     */
-	    assert(rbtree_count(t) == j);
-
-	    if (nkeys <= 100)
-	    {
-		/* validate the tree */
-		rbtree_validate(t);
-
-		puts("--------------------------------------------------------");
-		print_tree(t, ROOT(t), 0);
-	    }
-
-	    /* To increase stress, do a walk while 
-	     * everything else is going on.
-	     */
-	    if (!rbtree_walk_next(t, &key, NULL))
-		rbtree_walk_first(t, &lastkey, NULL);
-	    else
-	    {
-		if (strcmp((char *) lastkey, (char *) key) >= 0)
-		    printf("\nWalk generated keys in wrong order: %s -> %s\n",
-			   (char *) lastkey, (char *) key);
-
-		lastkey = key;
-	    }
-	}
-
-	TIME;			/* compute time usage */
-	printf("Time for stress test     : %.2fu %.2fs\n", usert, syst);
-    }
+    printf("Time to delete %d keys: %.2f\n", i, ELAPSED);
 
     // Do not call nft_rbtree_destroy!
     result = nft_rbtree_discard(t);
@@ -1364,16 +1354,6 @@ test_handle_api(void)
     int		result = 0;
     int 	i;
 
-    /* Timing stuff.
-     */
-    struct tms 	start, done;
-    float	usert, syst;
-    float	tick = 1.0 / sysconf(_SC_CLK_TCK);
-#define MARK	times(&start)
-#define TIME	times(&done); \
-    usert = (done.tms_utime - start.tms_utime) * tick; \
-    syst  = (done.tms_stime - start.tms_stime) * tick
-
     printf("\nTesting the handle-based API\n");
 
     /* Create a new tree with 512 nodes allocated.
@@ -1388,7 +1368,7 @@ test_handle_api(void)
     for (i = 0; i < nkeys; i++)
 	nft_rbtree_insert(h, keys[i], 0);
     TIME;			/* compute time usage */
-    printf("Time to insert %d keys: %.2fu %.2fs\n", i, usert, syst);
+    printf("Time to insert %d keys: %.2f\n", i, ELAPSED);
 
     /* Walk the tree */
     MARK;			/* record start time */
@@ -1403,7 +1383,7 @@ test_handle_api(void)
     TIME;			/* compute time usage */
     if (i != nkeys)
 	printf("Walk generated only %d keys!\n", i);
-    printf("Time to walk   %d keys: %.2fu %.2fs\n", i, usert, syst);
+    printf("Time to walk   %d keys: %.2f\n", i, ELAPSED);
 
     /* Search all keys */
     MARK;			/* record start time */
@@ -1411,7 +1391,7 @@ test_handle_api(void)
 	if (!nft_rbtree_search(h, keys[i], &data))
 	    printf("search: key not found %s\n", keys[i]);
     TIME;			/* compute time usage */
-    printf("Time to search %d keys: %.2fu %.2fs\n", i, usert, syst);
+    printf("Time to search %d keys: %.2f\n", i, ELAPSED);
 
     /* Delete all keys */
     MARK;			/* record start time */
@@ -1421,7 +1401,7 @@ test_handle_api(void)
 	    printf("delete: key not found %s\n", keys[i]);
     }
     TIME;			/* compute time usage */
-    printf("Time to delete %d keys: %.2fu %.2fs\n", i, usert, syst);
+    printf("Time to delete %d keys: %.2f\n", i, ELAPSED);
 
     result = nft_rbtree_free(h);
     assert(0 == result);
@@ -1445,17 +1425,23 @@ main(int argc, char * argv[])
 	keys[i++] = strdup(string);
     nkeys = i;
 
-    /* This test excercises the private pointer-based APIs.
+    /* Run some basic smoke tests.
      */
-    test_private_api();
-
-    /* This test excercises the private pointer-based APIs.
-     */
-    test_handle_api();
+    test_basic();
 
     /* Test with duplex keys.
      */
     test_duplex_keys();
+
+    /* This test excercises the private pointer-based APIs.
+     */
+    test_private_api();
+
+    /* This test excercises the Nifty handle-based APIs.
+     * Timing shows that the locking overhead in this API
+     * is significant, compared to the private pointer-based API.
+     */
+    test_handle_api();
 
     /* Free malloc'd storage.
      */
@@ -1467,4 +1453,3 @@ main(int argc, char * argv[])
 }
 
 #endif
-

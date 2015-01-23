@@ -85,11 +85,15 @@ subclass * subclass##_cast(void * vp) \
 
 #define NFT_DEFINE_HANDLE(subclass) \
 subclass##_h subclass##_handle(const subclass * sc) \
-{ nft_core * c = nft_core_cast(sc,nft_core_class); return c ? c->handle : c; }
+{ nft_core * c = nft_core_cast(sc,nft_core_class); \
+  return c ? c->handle : c; }
 
 #define NFT_DEFINE_LOOKUP(subclass) \
 subclass * subclass##_lookup(subclass##_h h) \
-{ nft_core * c = nft_core_lookup(h); subclass * sc = subclass##_cast(c); if (c && !sc) nft_core_discard(c); return sc; }
+{ nft_core * c  = nft_core_lookup(h); \
+  subclass * sc = nft_core_cast(c, subclass##_class); \
+  if ( c && !sc ) nft_core_discard(c); \
+  return sc; }
 
 #define NFT_DEFINE_DISCARD(subclass)  \
 int subclass##_discard(subclass * sc) \
