@@ -201,27 +201,85 @@
 #ifndef _NFT_RBTREE_H_
 #define _NFT_RBTREE_H_
 
+#include "nft_core.h"
+
 typedef struct nft_rbtree nft_rbtree;
+typedef struct nft_rbnode nft_rbnode;
 
 /*
  * Ease of use typedefs so the user can easily cast function pointers.
  */
-typedef int	(* RBTREE_COMPARE)( );
-typedef void	(* RBTREE_APPLY)  ( void * key, void * obj, void * arg);
+typedef int     (* RBTREE_COMPARE)( );
+typedef void    (* RBTREE_APPLY)  ( void * key, void * obj, void * arg);
+
+// Define the Nifty class string, showing nft_rbtree derives from nft_core.
+#define nft_rbtree_class nft_core_class ":nft_rbtree"
+
+// Declare helper functions nft_rbtree_cast, _handle, _lookup, _discard
+NFT_DECLARE_WRAPPERS(nft_rbtree,)
 
 
-nft_rbtree * nft_rbtree_create      (int n, RBTREE_COMPARE comparator);
-void	     nft_rbtree_destroy     (nft_rbtree *tree);
-int	     nft_rbtree_count       (nft_rbtree *tree);
-int	     nft_rbtree_validate    (nft_rbtree *tree);
-int	     nft_rbtree_insert      (nft_rbtree *tree, void  *key, void  *data);
-int 	     nft_rbtree_replace     (nft_rbtree *tree, void  *key, void  *data);
-int	     nft_rbtree_delete      (nft_rbtree *tree, void  *key, void **data);
-int	     nft_rbtree_search      (nft_rbtree *tree, void  *key, void **data);
-int	     nft_rbtree_walk_first  (nft_rbtree *tree, void **key, void **data);
-int	     nft_rbtree_walk_next   (nft_rbtree *tree, void **key, void **data);
-int	     nft_rbtree_walk_first_r(nft_rbtree *tree, void **key, void **data, void **walk);
-int	     nft_rbtree_walk_next_r (nft_rbtree *tree, void **key, void **data, void **walk);
-int	     nft_rbtree_apply       (nft_rbtree *tree, RBTREE_APPLY apply, void * arg);
+nft_rbtree_h	nft_rbtree_new         (int init_nodes, RBTREE_COMPARE comparator);
+int             nft_rbtree_free        (nft_rbtree_h);
+int		nft_rbtree_count       (nft_rbtree_h);
+int		nft_rbtree_validate    (nft_rbtree_h);
+int		nft_rbtree_insert      (nft_rbtree_h, void  *key, void  *data);
+int		nft_rbtree_replace     (nft_rbtree_h, void  *key, void  *data);
+int		nft_rbtree_delete      (nft_rbtree_h, void  *key, void **data);
+int		nft_rbtree_search      (nft_rbtree_h, void  *key, void **data);
+int		nft_rbtree_walk_first  (nft_rbtree_h, void **key, void **data);
+int		nft_rbtree_walk_next   (nft_rbtree_h, void **key, void **data);
+int		nft_rbtree_walk_first_r(nft_rbtree_h, void **key, void **data, void **walk);
+int		nft_rbtree_walk_next_r (nft_rbtree_h, void **key, void **data, void **walk);
+int		nft_rbtree_apply       (nft_rbtree_h, RBTREE_APPLY apply, void * arg);
+
+
+
+
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *
+ * These are the private, direct-access APIs. You can use them when subclassing,
+ * and in situations where you wish to avoid the overhead of the handle-based API.
+ * Note that these APIs do not themselves use the rwlock. It is up to you 
+ * calls, it is up to you to  the lock if necessary.
+ *
+ *~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+struct nft_rbnode
+{
+    nft_rbnode    * child[2];  // pointers to left and right child nodes
+    long            parent;    // pointer to parent node, plus color bit
+    void          * key;       // search key for node
+    void          * data;      // data associated with key
+};
+struct nft_rbtree
+{
+    nft_core         core;
+
+    int           (* compare)(); // key comparison predicate function
+    nft_rbnode     * nodes;      // Pointer to array of tree nodes
+    nft_rbnode     * current;    // Maintain walk state for non-reentrant walk
+    nft_rbnode       nil;        // Sentinel node. The root node is nil.child[0]
+    int              min_nodes;  // Initial number of nodes to allocate
+    int              num_nodes;  // Current size of the nodes[] array
+    int              next_free;  // Index of the next free node in nodes[]
+    pthread_rwlock_t rwlock;     // Multi-reader/single-writer lock
+};
+
+nft_rbtree * rbtree_create      (const char * class, size_t size,
+				 int init_nodes, RBTREE_COMPARE comparator);
+void         rbtree_destroy     (nft_core   *);
+int          rbtree_count       (nft_rbtree *);
+int          rbtree_validate    (nft_rbtree *);
+int          rbtree_insert      (nft_rbtree *, void  *key, void  *data);
+int          rbtree_replace     (nft_rbtree *, void  *key, void  *data);
+int          rbtree_delete      (nft_rbtree *, void  *key, void **data);
+int          rbtree_search      (nft_rbtree *, void  *key, void **data);
+int          rbtree_walk_first  (nft_rbtree *, void **key, void **data);
+int          rbtree_walk_next   (nft_rbtree *, void **key, void **data);
+int          rbtree_walk_first_r(nft_rbtree *, void **key, void **data, void **walk);
+int          rbtree_walk_next_r (nft_rbtree *, void **key, void **data, void **walk);
+int          rbtree_apply       (nft_rbtree *, RBTREE_APPLY apply, void * arg);
+
 
 #endif // _NFT_RBTREE_H_
