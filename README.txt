@@ -196,7 +196,7 @@ we discuss how this works in detail.
 "Object-oriented" development based on nft_core
 
 Many of the Nifty packages are derived in "object-oriented" style from nft_core.
-This section discusses how this derivations works. Our approach is as simple as
+This section discusses how this derivation works. Our approach is as simple as
 possible. The goals are to:
 
 * Support only simple single-inheritance,

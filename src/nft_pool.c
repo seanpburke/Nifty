@@ -541,6 +541,8 @@ nft_action_pool_new(int     queue_limit,
 
     nft_action_pool * action_pool = nft_action_pool_cast(pool);
     action_pool->action = action;
+
+    // Return a handle to the caller, not the pointer.
     return nft_action_pool_handle(action_pool);
 }
 
