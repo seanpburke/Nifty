@@ -5,20 +5,24 @@
 CC		= cc
 CPPFLAGS	= -I../include
 
+# Select debug or optimized build.
+#
+ifdef NDEBUG
+CFLAGS		= -std=gnu99 -Wall -Wno-unused -DNDEBUG -O3
+else
+CFLAGS		= -std=gnu99 -Wall -Wno-unused-function  -g
+endif
+
+ifdef NFT_LOCKLESS
+CPPFLAGS	+= -DNFT_LOCKLESS -DNFT_HMAPSZINI=16 -DNFT_HMAPSZMAX=16
+endif
+
 # By default, use gettimeofday() to get accurate time.
 # See ../include/nft_gettime.h for other choices.
 #
 CPPFLAGS	+= -DUSE_GETTIMEOFDAY
 
-# CPPFLAGS	+= -DNFT_LOCKLESS	# Uncomment to use the GCC atomic builtins in nft_handle.c
-
 # CPPFLAGS	+= -D_ALL_SOURCE	# Uncomment for Windows SFU builds.
-
-
-# Select debug or optimized build.
-#
-CFLAGS		= -std=gnu99 -Wall -Wno-unused-function -g
-#CFLAGS		= -std=gnu99 -Wall -Wno-unused          -O3 -DNDEBUG
 
 # Choose appropriate link libraries.
 #

@@ -23,9 +23,9 @@
  */
 #include <assert.h>
 #include <errno.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <nft_core.h>
 #include <nft_handle.h>
 
@@ -41,8 +41,8 @@ typedef struct nft_handle_map {
 // nft_handle_alloc will return NULL, just as if malloc had failed.
 //
 static nft_handle_map * HandleMap     = NULL;
-static unsigned         HandleMapSize = (1 << 10); // must be a power of 2
-static unsigned         HandleMapMax  = (1 << 20); // one million handles
+static unsigned         HandleMapSize = (1 << NFT_HMAPSZINI ); // must be a power of 2
+static unsigned         HandleMapMax  = (1 << NFT_HMAPSZMAX );
 static pthread_once_t   HandleOnce    = PTHREAD_ONCE_INIT;
 
 static void handle_once(void);
@@ -77,7 +77,7 @@ handle_hash(nft_handle handle, unsigned modulo)
 /*******************************************************************************
  *  POSIX portable implementation of the nft_handle APIs using mutexes.
  *
- *	void         handle_init(void);
+ *	void         nft_handle_init(void);
  *	nft_handle   nft_handle_alloc(nft_core * object);
  *	nft_core   * nft_handle_lookup(nft_handle handle);
  *	int          nft_handle_discard(nft_handle handle);
@@ -151,7 +151,10 @@ nft_handle_alloc(nft_core * object)
     nft_handle handle = NULL;
 
     // We will increment this counter to generate a sequence of unique handles.
-    static unsigned long NextHandle = 1;
+    // Only positive values are valid handles - when the NextHandle rolls over,
+    // we reset it to 1. This is important, as it allows handles to be compared
+    // by subtraction for sorting purposes, without overflow.
+    static ptrdiff_t NextHandle = 1;
 
     // Ensure that the handle table and mutex are initialized.
     if (nft_handle_init()) return NULL;
@@ -169,7 +172,7 @@ nft_handle_alloc(nft_core * object)
 	// that instead of handling hash collisions, we are searching for a new handle
 	// which has no hash collision.
 	for (unsigned i = 0; i < limit ; i++, NextHandle++) {
-	    if (NextHandle) {
+	    if (NextHandle > 0) {
 		unsigned index = handle_hash((nft_handle)NextHandle, HandleMapSize);
 		if (HandleMap[index].refcount == 0) {
 		    object->handle = handle = (nft_handle) NextHandle++;
@@ -177,6 +180,7 @@ nft_handle_alloc(nft_core * object)
 		    break;
 		}
 	    }
+	    else NextHandle = 1;
 	}
     } while (!handle && handle_map_enlarge());
     rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
@@ -449,13 +453,18 @@ static nft_handle
 handle_next(void)
 {
     // We will increment this counter to generate a sequence of unique handles.
-    static unsigned long NextHandle = 1;
+    static ptrdiff_t NextHandle = 1;
 
     // Use gcc atomic builtin to increment NextHandle, so that no mutex is needed.
     nft_handle   handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
 
-    // Since NULL is an invalid handle, increment once more in that case.
-    if (!handle) handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
+    // Only positive numbers are valid handles, so reset on rollover.
+    if (NextHandle <= 0) {
+	NextHandle = 1;
+	__sync_synchronize();
+    }
+    if (handle <= 0)
+	handle  = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
 
     return handle;
 }

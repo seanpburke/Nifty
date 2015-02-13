@@ -167,9 +167,7 @@ nft_core_gather(const char * class)
 /******************************************************************************/
 /******************************************************************************/
 #ifdef MAIN
-#ifdef NDEBUG
 #undef NDEBUG  // Enable asserts for test code.
-#endif
 #include <assert.h>
 #include <stdio.h>
 
@@ -198,9 +196,9 @@ main(int argc, char *argv[])
     assert(NULL == r);
 
     // Test handle_map_enlarge
-    int        n = 100000;
-    nft_core * parray[n];
-    for (int i = 0; i < n; i++) {
+    int        num = 1 << NFT_HMAPSZMAX;
+    nft_core * parray[num];
+    for (int i = 0; i < num; i++) {
 	nft_core * core = nft_core_create(nft_core_class, sizeof(nft_core));
 	assert(NULL != core);
 	parray[i] = core;
@@ -210,11 +208,11 @@ main(int argc, char *argv[])
     nft_handle * handles = nft_core_gather(nft_core_class);
     int i = 0;
     while (handles[i]) i++;
-    assert(i == n);
+    assert(i == num);
     free(handles);
 
     // Now discard all of the object references, freeing the objects.
-    for (int i = 0; i < n; i++)
+    for (int i = 0; i < num; i++)
 	nft_core_discard(parray[i]);
 
     // Confirm that all objects have been destroyed.

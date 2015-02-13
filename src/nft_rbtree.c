@@ -1139,7 +1139,6 @@ test_basic(void)
 
     for (int i = 0; i < 10; i++)
 	rbtree_insert(t, test[i], test[i]);
-
     assert(rbtree_validate(t));
 
     for (int i = 0; i < 10; i++) {
@@ -1162,6 +1161,7 @@ test_basic(void)
     for (int i = 0; i < 10; i++) {
 	assert(rbtree_delete(t, test[i], (void**) &data));
 	assert(data == test[i]);
+	assert(rbtree_validate(t));
     }
 
     {	/* This loop randomly inserts and deletes keys, while running the validator.

@@ -252,7 +252,7 @@ struct nft_rbnode
     void          * key;         // search key for node
     void          * data;        // data associated with key
     unsigned int    child[2];    // Index of left and right child nodes
-    unsigned int    parent;      // pointer to parent node, plus color bit
+    unsigned int    parent;      // Index of parent node
     unsigned int    red;         // boolean: red if true, else black
 };
 struct nft_rbtree
