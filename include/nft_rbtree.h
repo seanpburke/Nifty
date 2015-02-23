@@ -1,5 +1,5 @@
 /****************************************************************************
- * (C) Copyright Xenadyne, Inc. 2003-2014  All rights reserved.
+ * (C) Copyright Xenadyne, Inc. 2003-2015  All rights reserved.
  *
  * Permission to use, copy, modify and distribute this software for
  * any purpose and without fee is hereby granted, provided that the
@@ -68,8 +68,8 @@ typedef struct nft_rbnode nft_rbnode;
 /*
  * Ease of use typedefs so the user can easily cast function pointers.
  */
-typedef int     (* RBTREE_COMPARE)( );
-typedef void    (* RBTREE_APPLY)  ( void * key, void * obj, void * arg);
+typedef ptrdiff_t (* RBTREE_COMPARE)( );
+typedef void      (* RBTREE_APPLY)  ( void * key, void * obj, void * arg);
 
 // Define the Nifty class string, showing nft_rbtree derives from nft_core.
 #define nft_rbtree_class nft_core_class ":nft_rbtree"
@@ -201,9 +201,9 @@ int nft_rbtree_walk_next  ( nft_rbtree_h tree,
 //______________________________________________________________________________
 //
 int nft_rbtree_walk_first_r ( nft_rbtree_h tree,
-                              void     ** key,
-                              void     ** data,
-                              void     ** walk );
+                              void      ** key,
+                              void      ** data,
+                              void      ** walk );
 int nft_rbtree_walk_next_r  ( nft_rbtree_h tree,
                               void      ** key,
                               void      ** data,
@@ -260,7 +260,7 @@ struct nft_rbtree
     nft_core         core;
 
     nft_rbnode     * nodes;      // Pointer to array of tree nodes
-    int           (* compare)(); // key comparison predicate function
+    ptrdiff_t     (* compare)(); // key comparison predicate function
     unsigned         current;    // Maintain walk state for non-reentrant walk
     unsigned         min_nodes;  // Initial number of nodes to allocate
     unsigned         num_nodes;  // Current size of the nodes[] array

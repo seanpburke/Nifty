@@ -241,15 +241,15 @@ insert_fixup(nft_rbtree * tree, unsigned x)
 static void
 insert_node(nft_rbtree *tree, void *key, void *data)
 {
-    nft_rbnode * nodes  = tree->nodes;
-    int	   (*compare)() = tree->compare;
+    RBTREE_COMPARE compare = tree->compare;
+    nft_rbnode   * nodes   = tree->nodes;
+    ptrdiff_t	   comp    = -1;
 
     // This never gets called on an empty tree.
     assert(!IS_NIL(ROOT));
 
     unsigned x = ROOT;
     unsigned node;
-    int      c;
 
     // Find the node to which to attach the new leaf.
     do {
@@ -258,14 +258,14 @@ insert_node(nft_rbtree *tree, void *key, void *data)
 	/* Provide four parameters to comparison function to support duplex keys.
 	 * A simple comparison function can ignore the last two parameters.
 	 */
-	c = compare(key, KEY(node), data, DATA(node));
+	comp = compare(key, KEY(node), data, DATA(node));
 
-	x = (c < 0) ? LEFT(node) : RIGHT(node) ;
+	x = (comp < 0) ? LEFT(node) : RIGHT(node) ;
 
     } while (!IS_NIL(x));
 
     // Attach a new leaf under node, and rebalance the tree.
-    unsigned leaf = attach_leaf(tree, node, key, data, c >= 0 );
+    unsigned leaf = attach_leaf(tree, node, key, data, comp >= 0 );
     SET_RED(leaf);
     insert_fixup(tree, leaf);
     return;
@@ -466,7 +466,7 @@ resize_nodes(nft_rbtree *tree, int new_size)
  *-----------------------------------------------------------------------------
  */
 nft_rbtree *
-rbtree_create (const char * class, size_t size, int min_nodes, int (*compare)() )
+rbtree_create (const char * class, size_t size, int min_nodes, RBTREE_COMPARE compare )
 {
     /* The initial size must be nonnegative. The caller may specify zero.
      * In cases where it is not certain that any items will be inserted,
@@ -573,19 +573,20 @@ rbtree_delete(nft_rbtree * tree,  void *key,  void **data)
 {
     if ( tree == NULL) return 0;
 
-    int		(*compare)() = tree->compare;
-    nft_rbnode   *nodes      = tree->nodes;
-    void	 *token = data ? *data : NULL;
-    unsigned      node;
-    int   	  c = -1;
+    RBTREE_COMPARE compare = tree->compare;
+    nft_rbnode   * nodes   = tree->nodes;
+    void	 * token   = data ? *data : NULL;
+    ptrdiff_t	   comp    = -1;
+    unsigned       node;
+
 
     // Find the given key.
     for (node = ROOT;
-	 node != NIL && (c = compare(key, KEY(node), token, DATA(node)));
-	 node = (c < 0) ? LEFT(node) : RIGHT(node) );
+	 node != NIL && (comp = compare(key, KEY(node), token, DATA(node)));
+	 node = (comp < 0) ? LEFT(node) : RIGHT(node) );
 
     // If the key is found, store the data and delete node.
-    if (c == 0)
+    if (comp == 0)
     {
 	assert(!IS_NIL(node));
 
@@ -600,7 +601,7 @@ rbtree_delete(nft_rbtree * tree,  void *key,  void **data)
 	    (tree->min_nodes <= tree->num_nodes/2)  )
 	    resize_nodes(tree,  tree->num_nodes/2);
     }
-    return (c == 0);
+    return (comp == 0);
 }
 
 /*-----------------------------------------------------------------------------
@@ -615,11 +616,11 @@ rbtree_search(nft_rbtree *tree, void *key, void  **data)
 {
     if ( tree == NULL) return 0;
 
-    int	       (*compare)() = tree->compare;
-    nft_rbnode  *nodes      = tree->nodes;
-    void	*token = data ? *data : NULL;
-    unsigned	 node;
-    int		 comp = -1;
+    RBTREE_COMPARE compare = tree->compare;
+    nft_rbnode   * nodes   = tree->nodes;
+    void	 * token   = data ? *data : NULL;
+    ptrdiff_t	   comp    = -1;
+    unsigned	   node;
 
     // Find the given key.
     for (node = ROOT;
@@ -646,21 +647,21 @@ rbtree_replace(nft_rbtree *tree, void *key, void *data)
 {
     if ( tree == NULL) return 0;
 
-    int	       (*compare)() = tree->compare;
-    nft_rbnode  *nodes      = tree->nodes;
-    unsigned     node;
-    int c = -1;
+    RBTREE_COMPARE compare = tree->compare;
+    nft_rbnode   * nodes   = tree->nodes;
+    ptrdiff_t      comp    = -1;
+    unsigned       node;
 
     // Find the given key.
     for (node = ROOT;
-	 node != NIL && (c = compare(key, KEY(node), data, DATA(node)));
-	 node = (c < 0) ? LEFT(node) : RIGHT(node));
+	 node != NIL && (comp = compare(key, KEY(node), data, DATA(node)));
+	 node = (comp < 0) ? LEFT(node) : RIGHT(node));
 
     // If key found, change data.
-    if (c == 0)
+    if (comp == 0)
 	DATA(node) = data;
 
-    return (c == 0);
+    return (comp == 0);
 }
 
 /*-----------------------------------------------------------------------------
@@ -868,7 +869,7 @@ rbtree_validate( nft_rbtree * tree)
 
     if (check_pointers(tree, ROOT))
     {
-	int  (*compare)() = tree->compare;
+	RBTREE_COMPARE compare = tree->compare;
 	void 	*prevkey  = NULL;
 	void	*prevdata = NULL;
 	int	 first    = 1;
@@ -905,7 +906,7 @@ rbtree_validate( nft_rbtree * tree)
  */
 
 nft_rbtree_h
-nft_rbtree_new(int min_nodes, int (*compare)() )
+nft_rbtree_new(int min_nodes, RBTREE_COMPARE compare )
 {
     return nft_rbtree_handle(rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), min_nodes, compare));
 }
@@ -1135,7 +1136,7 @@ test_basic(void)
 
     printf("\nTesting basic operations\n");
 
-    nft_rbtree * t = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 10, strcmp);
+    nft_rbtree * t = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 10, (RBTREE_COMPARE)strcmp);
 
     for (int i = 0; i < 10; i++)
 	rbtree_insert(t, test[i], test[i]);
@@ -1211,7 +1212,7 @@ test_basic(void)
     assert(0 == result);
 }
 
-static int
+static ptrdiff_t
 strcmp_duplex(char *key1, char *key2, char *tok1, char *tok2)
 {
     int res = strcmp(key1, key2);
@@ -1283,7 +1284,7 @@ test_private_api(void)
      * realloc-nodes.
      */
     nft_rbtree * t = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree),
-				   512, (int (*)(void*, void*)) strcmp);
+				   512, (RBTREE_COMPARE) strcmp);
 
     /* Insert strings into tree  */
     MARK;			/* record start time */
@@ -1349,7 +1350,7 @@ test_handle_api(void)
      * in order to force a pass thru the offset code in
      * realloc-nodes.
      */
-    nft_rbtree_h h = nft_rbtree_new(512, (int (*)(void*, void*)) strcmp);
+    nft_rbtree_h h = nft_rbtree_new(512, (RBTREE_COMPARE) strcmp);
 
     /* Insert strings into tree  */
     MARK;			/* record start time */

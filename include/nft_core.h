@@ -37,6 +37,7 @@
 #else
 #include <pthread.h>
 #endif
+#include <stddef.h>
 #include <nft_gettime.h>
 
 

@@ -585,13 +585,14 @@ nft_queue_pop(nft_queue_h h)
 /*----------------------------------------------------------------------
  *  nft_queue_shutdown()
  *
- *  Shutdown queue and awaken blocked threads.
- *  Returns when all blocked threads have released the queue,
- *  and the queue is empty, or the timeout expires.
+ *  Increment the shutdown flag and awaken all blocked threads.
+ *  Returns when the queue is empty, or the timeout expires.
+ *  On ETIMEDOUT, the queue is not empty, and the original reference
+ *  has not been discarded, so the queue will not be freed.
  *
  *  Returns zero 	- on success.
  *  	    EINVAL	- not a valid queue.
- *          ESHUTDOWN   - queue has already been shutdown.
+ *          ETIMEDOUT   - queue has already been shutdown.
  *----------------------------------------------------------------------
  */
 int
@@ -830,6 +831,14 @@ poll_output(void * arg)
     return (void*) rc;
 }
 
+/* Timing stuff.
+ */
+struct timespec mark, done;
+#define MARK	mark = nft_gettime()
+#define TIME	done = nft_gettime()
+#define ELAPSED ((done.tv_sec * 1.0 + done.tv_nsec * 0.000000001) - \
+                 (mark.tv_sec * 1.0 + mark.tv_nsec * 0.000000001)   )
+
 int
 main()
 {
@@ -862,6 +871,7 @@ main()
      * this demo.
      */
     fputs("multithread test, reading from stdin...\n", stderr);
+    MARK; // record start time
 
     // Create the input and output queues.
     input_Q  = nft_queue_new(Q_LIMIT);
@@ -911,7 +921,8 @@ main()
     // but if it succeeded on the first try, this should return EINVAL.
     rc = nft_queue_shutdown(output_Q, 0); assert(rc == 0 || rc == EINVAL);
 
-    fprintf(stderr, "words in: %d	words out: %d\n", countin, countout);
+    TIME; // compute elapsed time
+    fprintf(stderr, "words in: %d	words out: %d	elapsed: %.3f\n", countin, countout, ELAPSED);
     assert(countin == countout);
 
     fprintf(stderr, "nft_queue: All tests passed.\n");
