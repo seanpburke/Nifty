@@ -80,7 +80,7 @@ handle_hash(nft_handle handle, unsigned modulo)
  *	nft_handle   nft_handle_alloc(nft_core * object);
  *	nft_core   * nft_handle_lookup(nft_handle handle);
  *	int          nft_handle_discard(nft_handle handle);
- *	nft_handle * nft_handle_list(const char * class);
+ *	nft_handle * nft_handle_apply();
  *
  *  The mutex-locked handle map that is implemented here,
  *  is a good compromise for simplicity, efficiency and portability.
@@ -276,7 +276,7 @@ nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char 
  *	nft_handle   nft_handle_alloc(nft_core * object);
  *	nft_core   * nft_handle_lookup(nft_handle handle);
  *	int          nft_handle_discard(nft_handle handle);
- *	nft_handle * nft_handle_list(const char * class);
+ *	nft_handle * nft_handle_apply();
  *
  *  The implementation below uses GCC builtin atomic operations to implement
  *  lockless management of the handle table. It is experimental, and only
@@ -603,11 +603,52 @@ nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char 
 #include <assert.h>
 #include <stdio.h>
 
+// Create a dummy nft_core object with an empty destructor.
+void destroy(nft_core * core) { }
+nft_core dummy = { .class = "nft_core", .handle = NULL, .destroy = destroy };
+
+// Define an apply function to count handles.
+int counter = 0;
+void apply(nft_core * core, const char * class , void * param)
+{
+    counter++;
+}
+
+const int  maximum = 1000000;
+nft_handle handles[maximum];
+nft_core   cores[maximum];
 
 int
 main(int argc, char *argv[])
 {
-    // FIXME - implement some tests!
+    // alloc
+    for (int i = 0; i < maximum; i++) {
+        cores[i]   = dummy;
+        handles[i] = nft_handle_alloc(&cores[i]);
+        assert(cores[i].handle == handles[i]);
+    }
+
+    // lookup/discard
+    for (int i = 0; i < maximum; i++) {
+        nft_core * core  = nft_handle_lookup(handles[i]);
+        assert(&cores[i] == core);
+        nft_handle_discard(core);
+    }
+
+    // apply
+    counter = 0;
+    nft_handle_apply(apply, "nft_core", NULL);
+    assert(maximum == counter);
+
+    // discard
+    for (int i = 0; i < maximum; i++) {
+        nft_handle_discard(&cores[i]);
+    }
+
+    // apply
+    counter = 0;
+    nft_handle_apply(apply, "nft_core", NULL);
+    assert(0 == counter);
 
     printf("nft_handle: All tests passed.\n");
     exit(0);
