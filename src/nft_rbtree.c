@@ -243,7 +243,7 @@ insert_node(nft_rbtree *tree, void *key, void *data)
 {
     RBTREE_COMPARE compare = tree->compare;
     nft_rbnode   * nodes   = tree->nodes;
-    ptrdiff_t	   comp    = -1;
+    int            comp    = -1;
 
     // This never gets called on an empty tree.
     assert(!IS_NIL(ROOT));
@@ -575,8 +575,8 @@ rbtree_delete(nft_rbtree * tree,  void *key,  void **data)
 
     RBTREE_COMPARE compare = tree->compare;
     nft_rbnode   * nodes   = tree->nodes;
-    void	 * token   = data ? *data : NULL;
-    ptrdiff_t	   comp    = -1;
+    void         * token   = data ? *data : NULL;
+    int            comp    = -1;
     unsigned       node;
 
 
@@ -618,9 +618,9 @@ rbtree_search(nft_rbtree *tree, void *key, void  **data)
 
     RBTREE_COMPARE compare = tree->compare;
     nft_rbnode   * nodes   = tree->nodes;
-    void	 * token   = data ? *data : NULL;
-    ptrdiff_t	   comp    = -1;
-    unsigned	   node;
+    void         * token   = data ? *data : NULL;
+    int            comp    = -1;
+    unsigned       node;
 
     // Find the given key.
     for (node = ROOT;
@@ -649,7 +649,7 @@ rbtree_replace(nft_rbtree *tree, void *key, void *data)
 
     RBTREE_COMPARE compare = tree->compare;
     nft_rbnode   * nodes   = tree->nodes;
-    ptrdiff_t      comp    = -1;
+    int            comp    = -1;
     unsigned       node;
 
     // Find the given key.
@@ -690,7 +690,7 @@ rbtree_walk_first_r(nft_rbtree *tree, void  **key, void  **data, void **walk)
     if (tree == NULL) return 0;
 
     nft_rbnode * nodes = tree->nodes;
-    int	         result = 0;
+    int          result = 0;
     unsigned     node;
 
     // If tree is not empty, set *walk to node's successor.
@@ -722,7 +722,7 @@ rbtree_walk_next_r(nft_rbtree *tree, void **key, void **data, void **walk)
 
     nft_rbnode * nodes  = tree->nodes;
     unsigned     node   = (long) *walk;
-    int	         result = 0;
+    int          result = 0;
 
     if (!IS_NIL(node))
     {
@@ -869,11 +869,11 @@ rbtree_validate( nft_rbtree * tree)
 
     if (check_pointers(tree, ROOT))
     {
-	RBTREE_COMPARE compare = tree->compare;
-	void 	*prevkey  = NULL;
-	void	*prevdata = NULL;
-	int	 first    = 1;
-	unsigned node;
+        RBTREE_COMPARE compare = tree->compare;
+        void    *prevkey  = NULL;
+        void    *prevdata = NULL;
+        int      first    = 1;
+        unsigned node;
 
 	for (node = node_first(tree); node;  node = node_successor(tree, node))
 	{
@@ -1143,7 +1143,7 @@ test_basic(void)
     assert(rbtree_validate(t));
 
     for (int i = 0; i < 10; i++) {
-	assert(rbtree_search(t, test[i], (void**) &data));
+	assert(rbtree_search(t, test[i], &data));
 	assert(data == test[i]);
     }
 
@@ -1151,9 +1151,9 @@ test_basic(void)
 	assert(rbtree_replace(t, test[i], test[i]));
 
 
-    for (int i = 0, result = rbtree_walk_first(t, (void**) &key, (void**) &data);
+    for (int i = 0, result = rbtree_walk_first(t, &key, &data);
 	 result;
-	 i++,       result = rbtree_walk_next (t, (void**) &key, (void**) &data))
+	 i++,       result = rbtree_walk_next (t, &key, &data))
     {
 	assert(key  == test[i]);
 	assert(data == test[i]);
@@ -1212,7 +1212,7 @@ test_basic(void)
     assert(0 == result);
 }
 
-static ptrdiff_t
+static int
 strcmp_duplex(char *key1, char *key2, char *tok1, char *tok2)
 {
     int res = strcmp(key1, key2);
@@ -1283,8 +1283,7 @@ test_private_api(void)
      * in order to force a pass thru the offset code in
      * realloc-nodes.
      */
-    nft_rbtree * t = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree),
-				   512, (RBTREE_COMPARE) strcmp);
+    nft_rbtree * t = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 512, (RBTREE_COMPARE) strcmp);
 
     /* Insert strings into tree  */
     MARK;			/* record start time */
@@ -1406,14 +1405,6 @@ main(int argc, char * argv[])
     limit  = ((argc > 1) ? atoi(argv[1]) : MAXKEYS);
     limit  = ((limit > MAXKEYS) ? MAXKEYS : limit);
 
-    /* Insert strings into key table
-     */
-    char string[256];
-    int  i = 0;
-    while (fgets(string, sizeof(string), stdin) && (i < limit))
-	keys[i++] = strdup(string);
-    nkeys = i;
-
     /* Run some basic smoke tests.
      */
     test_basic();
@@ -1421,6 +1412,14 @@ main(int argc, char * argv[])
     /* Test with duplex keys.
      */
     test_duplex_keys();
+
+    /* Insert strings into key table
+     */
+    char string[256];
+    int  i = 0;
+    while (fgets(string, sizeof(string), stdin) && (i < limit))
+	keys[i++] = strdup(string);
+    nkeys = i;
 
     /* This test excercises the private pointer-based APIs.
      */

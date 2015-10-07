@@ -68,7 +68,7 @@ typedef struct nft_rbnode nft_rbnode;
 /*
  * Ease of use typedefs so the user can easily cast function pointers.
  */
-typedef ptrdiff_t (* RBTREE_COMPARE)( );
+typedef int       (* RBTREE_COMPARE)( );
 typedef void      (* RBTREE_APPLY)  ( void * key, void * obj, void * arg);
 
 // Define the Nifty class string, showing nft_rbtree derives from nft_core.
@@ -260,7 +260,7 @@ struct nft_rbtree
     nft_core         core;
 
     nft_rbnode     * nodes;      // Pointer to array of tree nodes
-    ptrdiff_t     (* compare)(); // key comparison predicate function
+    int           (* compare)(); // key comparison predicate function
     unsigned         current;    // Maintain walk state for non-reentrant walk
     unsigned         min_nodes;  // Initial number of nodes to allocate
     unsigned         num_nodes;  // Current size of the nodes[] array

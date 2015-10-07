@@ -614,9 +614,10 @@ void apply(nft_core * core, const char * class , void * param)
     counter++;
 }
 
-const int  maximum = 1000000;
-nft_handle handles[maximum];
-nft_core   cores[maximum];
+#define MAXIMUM 1000000
+const int  maximum = MAXIMUM;
+nft_handle handles[MAXIMUM];
+nft_core   cores[MAXIMUM];
 
 int
 main(int argc, char *argv[])
