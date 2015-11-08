@@ -43,10 +43,6 @@ handle table. See src/nft_handle.c for more information.
 The libnifty packages can be built on WIN32. For more information,
 refer to the section "WIN32 Notes" below.
 
-This project is hosted at SourceForge.net:
-
-  http://sourceforge.net/projects/libnifty/
-
 If you have questions or contributions, send them to sean@xenadyne.com.
 -SEan Burke
 
