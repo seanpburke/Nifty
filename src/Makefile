@@ -37,7 +37,7 @@ LDLIBS		= -lpthread			# Solaris, Linux, AIX
 #
 # You should not need to alter the definitions below.
 #
-VERSION = 0.94
+VERSION = 0.95
 LIBDIR	= ../lib
 LIB	= $(LIBDIR)/libnifty.a
 SRCS	= nft_core.c nft_handle.c nft_pool.c nft_queue.c nft_rbtree.c nft_string.c nft_task.c nft_win32.c
@@ -46,8 +46,18 @@ EXES	= $(SRCS:.c=)
 DISTDIR = Nifty-$(VERSION)
 DIST	= ../../Nifty-$(VERSION).tgz
 
+
 all:	$(LIB)
 
+# Build with optimization
+opt:
+	env NDEBUG=1 make all
+
+# Build with the lockless nft_handle mode.
+lockless:
+	env NFT_LOCKLESS=1 make all
+
+# Execute the unit tests.
 test:	$(EXES)
 	$(VALGRIND) ./nft_handle
 	$(VALGRIND) ./nft_core
@@ -58,7 +68,8 @@ test:	$(EXES)
 	$(VALGRIND) ./nft_task
 	$(VALGRIND) ./nft_win32
 
-dist:    $(DIST)
+# Create a distribution tarball.
+dist:	$(DIST)
 
 $(LIB): $(LIBDIR) $(OBJS)
 	ar -ruv $@ $(OBJS)

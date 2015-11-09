@@ -68,8 +68,8 @@ typedef struct nft_rbnode nft_rbnode;
 /*
  * Ease of use typedefs so the user can easily cast function pointers.
  */
-typedef int       (* RBTREE_COMPARE)( );
-typedef void      (* RBTREE_APPLY)  ( void * key, void * obj, void * arg);
+typedef int     (* RBTREE_COMPARE)( );
+typedef void    (* RBTREE_APPLY)  ( void * key, void * obj, void * arg);
 
 // Define the Nifty class string, showing nft_rbtree derives from nft_core.
 #define nft_rbtree_class nft_core_class ":nft_rbtree"
@@ -161,8 +161,8 @@ int nft_rbtree_delete ( nft_rbtree_h tree,
 //______________________________________________________________________________
 //
 int nft_rbtree_apply ( nft_rbtree_h handle,
-		       RBTREE_APPLY apply,
-		       void       * arg);
+                       RBTREE_APPLY apply,
+                       void       * arg);
 /*
  Call the function 'apply' on every item in the tree.
  For each item the function is passed the key, data, and the void * arg.
@@ -269,7 +269,7 @@ struct nft_rbtree
 };
 
 nft_rbtree * rbtree_create      (const char * class, size_t size,
-				 int init_nodes, RBTREE_COMPARE comparator);
+                                 int init_nodes, RBTREE_COMPARE comparator);
 void         rbtree_destroy     (nft_core   *);
 int          rbtree_count       (nft_rbtree *);
 int          rbtree_validate    (nft_rbtree *);

@@ -17,7 +17,7 @@
  *
  * File: nft_handle.c
  *
- * Description: Implement the handle-management substem used by nft_core.
+ * Description: Implement the handle-management subsystem used by nft_core.
  *
  ******************************************************************************
  */
@@ -525,7 +525,7 @@ nft_handle_lookup(nft_handle handle)
 
     if (handle_map_increment(slot) > 0)
     {
-	// handle_map_acquire will only increment refcounts that were already positive,
+	// handle_map_increment will only increment refcounts that were already positive,
 	// so this result means that we have locked a live object reference.
 	// But, is this the object that we are looking for?
 	if (handle == slot->object->handle)
