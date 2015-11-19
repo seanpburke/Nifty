@@ -614,7 +614,7 @@ void apply(nft_core * core, const char * class , void * param)
     counter++;
 }
 
-#define MAXIMUM 1000000
+#define MAXIMUM (1 << NFT_HMAPSZMAX)
 const int  maximum = MAXIMUM;
 nft_handle handles[MAXIMUM];
 nft_core   cores[MAXIMUM];

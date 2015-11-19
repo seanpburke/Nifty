@@ -870,21 +870,16 @@ rbtree_validate( nft_rbtree * tree)
     if (check_pointers(tree, ROOT))
     {
         RBTREE_COMPARE compare = tree->compare;
-        void    *prevkey  = NULL;
-        void    *prevdata = NULL;
-        int      first    = 1;
-        unsigned node;
 
-	for (node = node_first(tree); node;  node = node_successor(tree, node))
+	for (unsigned prev = NIL, node = node_first(tree);
+	     node != NIL;
+	     prev = node, node = node_successor(tree, node))
 	{
-	    if (!first && compare(KEY(node), prevkey, DATA(node), prevdata) < 0)
+	    if (prev && compare(KEY(node), KEY(prev), DATA(node), DATA(prev)) < 0)
 	    {
 		assert(!"rbtree_validate: Key order violation!\n");
 		result = 0;
 	    }
-	    prevkey  = KEY(node);
-	    prevdata = DATA(node);
-	    first    = 0;
 	}
     }
     else

@@ -171,6 +171,9 @@ nft_core_gather(const char * class)
 #include <assert.h>
 #include <stdio.h>
 
+#define MAXIMUM (1 << NFT_HMAPSZMAX)
+nft_core * parray[MAXIMUM];
+
 // Test (and demonstrate) use of the constructor and helper functions.
 //
 int
@@ -196,9 +199,7 @@ main(int argc, char *argv[])
     assert(NULL == r);
 
     // Test handle_map_enlarge
-    int        num = 1 << NFT_HMAPSZMAX;
-    nft_core * parray[num];
-    for (int i = 0; i < num; i++) {
+    for (int i = 0; i < MAXIMUM; i++) {
 	nft_core * core = nft_core_create(nft_core_class, sizeof(nft_core));
 	assert(NULL != core);
 	parray[i] = core;
@@ -208,11 +209,11 @@ main(int argc, char *argv[])
     nft_handle * handles = nft_core_gather(nft_core_class);
     int i = 0;
     while (handles[i]) i++;
-    assert(i == num);
+    assert(i == MAXIMUM);
     free(handles);
 
     // Now discard all of the object references, freeing the objects.
-    for (int i = 0; i < num; i++)
+    for (int i = 0; i < MAXIMUM; i++)
 	nft_core_discard(parray[i]);
 
     // Confirm that all objects have been destroyed.
