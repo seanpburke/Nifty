@@ -49,14 +49,6 @@ DIST	= ../../Nifty-$(VERSION).tgz
 
 all:	$(LIB)
 
-# Build with optimization
-opt:
-	env NDEBUG=1 make all
-
-# Build with the lockless nft_handle mode.
-lockless:
-	env NFT_LOCKLESS=1 make all
-
 # Execute the unit tests.
 test:	$(EXES)
 	$(VALGRIND) ./nft_handle

@@ -615,7 +615,6 @@ void apply(nft_core * core, const char * class , void * param)
 }
 
 #define MAXIMUM (1 << NFT_HMAPSZMAX)
-const int  maximum = MAXIMUM;
 nft_handle handles[MAXIMUM];
 nft_core   cores[MAXIMUM];
 
@@ -623,27 +622,27 @@ int
 main(int argc, char *argv[])
 {
     // alloc
-    for (int i = 0; i < maximum; i++) {
+    for (int i = 0; i < HandleMapMax; i++) {
         cores[i]   = dummy;
         handles[i] = nft_handle_alloc(&cores[i]);
         assert(cores[i].handle == handles[i]);
     }
 
     // lookup/discard
-    for (int i = 0; i < maximum; i++) {
+    for (int i = 0; i < HandleMapMax; i++) {
         nft_core * core  = nft_handle_lookup(handles[i]);
         assert(&cores[i] == core);
-        nft_handle_discard(core);
+        assert(0 == nft_handle_discard(core));
     }
 
     // apply
     counter = 0;
     nft_handle_apply(apply, "nft_core", NULL);
-    assert(maximum == counter);
+    assert(HandleMapMax == counter);
 
     // discard
-    for (int i = 0; i < maximum; i++) {
-        nft_handle_discard(&cores[i]);
+    for (int i = 0; i < HandleMapMax; i++) {
+        assert(0 == nft_handle_discard(&cores[i]));
     }
 
     // apply
