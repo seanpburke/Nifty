@@ -105,6 +105,7 @@ nft_task_h  nft_task_this(void);
 typedef struct nft_task
 {
     nft_core        core;
+    long            index;		// position in heap
 
     struct timespec abstime;		// absolute time to perform task
     struct timespec interval;		// period to repeat task
