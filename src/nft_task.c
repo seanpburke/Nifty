@@ -271,6 +271,7 @@ nft_task_create(const char    * class,
 
     // Override the nft_core destructor with our own.
     task->core.destroy = nft_task_destroy;
+    task->index        = -1;
     task->action       = nft_task_action;
     task->interval     = interval;
     task->function     = function;
@@ -364,14 +365,17 @@ nft_task_cancel_task(nft_task * task)
     if (task->index >= 0 && task->index < Queue.count) {
         assert(Queue.tasks[task->index] == task);
 
-        // Remove the task from the queue.
-        heap_delete(&Queue, task->index);
+        if (Queue.tasks[task->index] == task)
+        {
+            // Remove the task from the queue.
+            heap_delete(&Queue, task->index);
 
-        // Discard the reference that was stored in the queue.
-        // This reference was created in nft_task_schedule by nft_task_create().
-        nft_task_discard(task);
+            // Discard the reference that was stored in the queue.
+            // This reference was created in nft_task_schedule by nft_task_create().
+            nft_task_discard(task);
 
-        result = 1;
+            result = 1;
+        }
     }
     rc = pthread_mutex_unlock(&QueueMutex); assert(rc == 0);
     return result;
@@ -664,10 +668,10 @@ heap_pop(heap_t *heap, nft_task ** itemp)
     if (itemp) *itemp = task;
 
     if (task) {
-        task->index = -1;
-        heap->count--;
+	heap->count--;
 	SWAP_NODES( 0, heap->count)
 	downheap(heap, 0);
+	task->index = -1;
     }
     // Realloc heap->tasks if less than one quarter full.
     if ((heap->count  <  (heap->size >> 2)) &&
@@ -684,22 +688,23 @@ heap_pop(heap_t *heap, nft_task ** itemp)
 static void
 heap_delete(heap_t *heap, long index)
 {
-    long last = heap->count - 1;
-    assert(last >= 0);
-    assert((index >= 0) && (index <= last));
+    assert(heap->count > 0);
+    assert(index >= 0 && index < heap->count);
 
-    if (index < last)
+    heap->tasks[index]->index = -1;
+    heap->count--;
+
+    // Removing the last node requires no further work.
+    if (index < heap->count)
     {
-	int comp = COMPARE_NODES(index, last);
-	SWAP_NODES( index, last)
-	heap->count--;
+	int comp = COMPARE_NODES(index, heap->count);
 
-	if      (comp > 0) downheap(heap, index);
+	// Replace the task at index with the last task
+	heap->tasks[index] = heap->tasks[heap->count];
+	heap->tasks[index]->index = index;
+
+	if	(comp > 0) downheap(heap, index);
 	else if (comp < 0)   upheap(heap, index);
-    }
-    else if (index == last)
-    {
-	heap->count--;
     }
 
     // Realloc heap->tasks if less than one quarter full.
@@ -1162,6 +1167,7 @@ test_heap()
     {
 	nft_task * task;
 	heap_pop(&heap, &task);
+	assert(task->index == -1);
 	assert(task->abstime.tv_sec  == (i / 1000));
 	assert(task->abstime.tv_nsec == (i % 1000) * 1000000);
 	free(task);
@@ -1179,10 +1185,13 @@ test_heap()
 	tasks[i]->abstime.tv_nsec = 0;
 	heap_insert(&heap, tasks[i]);
     }
+    for (int i = 0; i < 100; i++) assert(heap.tasks[i]->index == i);
     for (int i = 0; i < 100; i++)
     {
-        assert(heap.tasks[tasks[i]->index] == tasks[i]);
+	assert(heap.tasks[tasks[i]->index] == tasks[i]);
 	heap_delete(&heap, tasks[i]->index);
+	assert(tasks[i]->index == -1);
+	free(tasks[i]);
     }
     printf(" Passed!\n");
 }
