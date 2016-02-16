@@ -65,18 +65,19 @@
 typedef struct nft_rbtree nft_rbtree;
 typedef struct nft_rbnode nft_rbnode;
 
-/*
- * Ease of use typedefs so the user can easily cast function pointers.
- */
-typedef int     (* RBTREE_COMPARE)( );
-typedef void    (* RBTREE_APPLY)  ( void * key, void * obj, void * arg);
-
 // Define the Nifty class string, showing nft_rbtree derives from nft_core.
 #define nft_rbtree_class nft_core_class ":nft_rbtree"
 
 // Declare helper functions nft_rbtree_cast, _handle, _lookup, _discard
 NFT_DECLARE_WRAPPERS(nft_rbtree,)
 
+// Don't use this to cast - your comparison function must return long.
+typedef long    (* RBTREE_COMPARE)( /* void * obj, void * obj2 */ );
+
+/* Ease of use typedefs so the user can easily cast function pointers.
+ */
+typedef void    (* RBTREE_APPLY)  ( void * key, void * obj, void * arg);
+typedef void    (* RBTREE_APPLYX) (             void * obj, void * arg);
 
 
 //______________________________________________________________________________
@@ -260,18 +261,19 @@ struct nft_rbtree
     nft_core         core;
 
     nft_rbnode     * nodes;      // Pointer to array of tree nodes
-    int           (* compare)(); // key comparison predicate function
-    unsigned         current;    // Maintain walk state for non-reentrant walk
-    unsigned         min_nodes;  // Initial number of nodes to allocate
-    unsigned         num_nodes;  // Current size of the nodes[] array
-    unsigned         next_free;  // Index of the next free node in nodes[]
+    RBTREE_COMPARE   compare;    // key comparison predicate function
+    unsigned int     current;    // Maintain walk state for non-reentrant walk
+    unsigned int     min_nodes;  // Initial number of nodes to allocate
+    unsigned int     num_nodes;  // Current size of the nodes[] array
+    unsigned int     next_free;  // Index of the next free node in nodes[]
+    unsigned int     locking;    // rwlock is enabled if true.
     pthread_rwlock_t rwlock;     // Multi-reader/single-writer lock
 };
 
-nft_rbtree * rbtree_create      (const char * class, size_t size,
-                                 int init_nodes, RBTREE_COMPARE comparator);
-void         rbtree_destroy     (nft_core   *);
-int          rbtree_count       (nft_rbtree *);
+nft_rbtree * rbtree_new         (int min_nodes, RBTREE_COMPARE compare);
+void         rbtree_free        (nft_rbtree * tree);
+unsigned     rbtree_count       (nft_rbtree *);
+void         rbtree_locking     (nft_rbtree *, unsigned enabled);
 int          rbtree_validate    (nft_rbtree *);
 int          rbtree_insert      (nft_rbtree *, void  *key, void  *data);
 int          rbtree_replace     (nft_rbtree *, void  *key, void  *data);
@@ -281,7 +283,15 @@ int          rbtree_walk_first  (nft_rbtree *, void **key, void **data);
 int          rbtree_walk_next   (nft_rbtree *, void **key, void **data);
 int          rbtree_walk_first_r(nft_rbtree *, void **key, void **data, void **walk);
 int          rbtree_walk_next_r (nft_rbtree *, void **key, void **data, void **walk);
-int          rbtree_apply       (nft_rbtree *, RBTREE_APPLY apply, void * arg);
+int          rbtree_apply       (nft_rbtree *, RBTREE_APPLY  apply, void * arg);
+int          rbtree_applyx      (nft_rbtree *, RBTREE_APPLYX apply, void * arg);
+long         rbtree_compare_pointers(void * h1, void * h2);
+long         rbtree_compare_strings (char * s1, char * s2);
+
+/* These calls should only be used by subclasses.
+ */
+nft_rbtree * rbtree_create      (const char * class, size_t size, int min_nodes, RBTREE_COMPARE compare);
+void         rbtree_destroy     (nft_core   *);
 
 
 #endif // _NFT_RBTREE_H_
