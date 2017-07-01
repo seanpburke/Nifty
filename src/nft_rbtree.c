@@ -28,8 +28,6 @@
  * This package illustrates the design approach where you take a
  * traditional C package and "wrap" it with Nifty handle-based APIs,
  * while retaining the option to use the traditional direct API.
- * This package has many uses that do not entail shared access,
- * where locking would be unnecessary overhead.
  *
  * DUPLEX KEYS
  *
@@ -43,6 +41,8 @@
  */
 #include <assert.h>
 #include <errno.h>
+#include <stdarg.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -243,7 +243,7 @@ insert_node(nft_rbtree *tree, void *key, void *data)
 {
     RBTREE_COMPARE compare = tree->compare;
     nft_rbnode   * nodes   = tree->nodes;
-    int            comp    = -1;
+    long           comp    = -1;
 
     // This never gets called on an empty tree.
     assert(!IS_NIL(ROOT));
@@ -458,6 +458,102 @@ resize_nodes(nft_rbtree *tree, int new_size)
 
 /*-----------------------------------------------------------------------------
  *
+ * rbtree_new		Create a new rbtree
+ *
+ *-----------------------------------------------------------------------------
+ */
+nft_rbtree *
+rbtree_new(int min_nodes, RBTREE_COMPARE compare )
+{
+    return rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), min_nodes, compare);
+}
+
+/*-----------------------------------------------------------------------------
+ *
+ * rbtree_vnew		Create a new rbtree variadic
+ *
+ *-----------------------------------------------------------------------------
+ */
+nft_rbtree *
+rbtree_vnew (int num, RBTREE_COMPARE compare, void * key, ...)
+{
+    nft_rbtree * tree = rbtree_new(num, compare);
+
+    va_list ap;
+    for (va_start( ap, key);  key;  key = va_arg(ap, void*)) {
+        void * val = va_arg(ap, void*);
+        rbtree_insert(tree, key, val);
+    }
+    va_end(ap);
+
+    return tree;
+}
+
+/*-----------------------------------------------------------------------------
+ *
+ * rbtree_free		Free an rbtree created by rbtree_new().
+ *
+ *-----------------------------------------------------------------------------
+ */
+void
+rbtree_free(nft_rbtree * tree)
+{
+    if (tree) nft_rbtree_discard(tree);
+}
+
+/*-----------------------------------------------------------------------------
+ *
+ * rbtree_locking	Enable or disable the rbtree's rwlock.
+ *
+ *-----------------------------------------------------------------------------
+ */
+void
+rbtree_locking(nft_rbtree * tree, unsigned enabled)
+{
+    if (tree) tree->locking = enabled;
+}
+
+/*-----------------------------------------------------------------------------
+ *
+ * rbtree_rdlock	Acquire a shared reader's lock.
+ *
+ *-----------------------------------------------------------------------------
+ */
+int
+rbtree_rdlock(nft_rbtree * tree)
+{
+    int r = pthread_rwlock_rdlock(&tree->rwlock); assert(r == 0);
+    return r;
+}
+
+/*-----------------------------------------------------------------------------
+ *
+ * rbtree_wrlock	Acquire an exclusive writer's lock.
+ *
+ *-----------------------------------------------------------------------------
+ */
+int
+rbtree_wrlock(nft_rbtree * tree)
+{
+    int r = pthread_rwlock_wrlock(&tree->rwlock); assert(r == 0);
+    return r;
+}
+
+/*-----------------------------------------------------------------------------
+ *
+ * rbtree_unlock	Release either shared or exclusive lock.
+ *
+ *-----------------------------------------------------------------------------
+ */
+int
+rbtree_unlock(nft_rbtree * tree)
+{
+    int r = pthread_rwlock_unlock(&tree->rwlock); assert(r == 0);
+    return r;
+}
+
+/*-----------------------------------------------------------------------------
+ *
  * rbtree_create
  *
  * This constructor takes additional parameters class and size,
@@ -497,6 +593,7 @@ rbtree_create (const char * class, size_t size, int min_nodes, RBTREE_COMPARE co
     tree->num_nodes = min_nodes;
     tree->next_free = 1; // remember that the zeroth node is our sentinel
     tree->current   = 0;
+    tree->locking   = 0;
 
     // Initialize the sentinel
     tree->nodes[0]  = (nft_rbnode) { 0 };
@@ -508,7 +605,9 @@ rbtree_create (const char * class, size_t size, int min_nodes, RBTREE_COMPARE co
 
 /*-----------------------------------------------------------------------------
  *
- * rbtree_destroy	Free the tree's memory.
+ * rbtree_destroy	Destroy a freed rbtree.
+ *
+ * Do not call this directly or you will leak handles. Use rbtree_free instead.
  *
  *-----------------------------------------------------------------------------
  */
@@ -535,6 +634,10 @@ rbtree_insert(nft_rbtree *tree,  void * key,  void * data)
 {
     if (!tree) return 0;
 
+    int result = 0;
+
+    if (tree->locking) rbtree_wrlock(tree);
+
     assert(tree->next_free >= 0);
     assert(tree->next_free <= tree->num_nodes);
 
@@ -548,17 +651,18 @@ rbtree_insert(nft_rbtree *tree,  void * key,  void * data)
 	if (new_size == 0)
 	    new_size =  4;
 
-	if (!resize_nodes(tree, new_size))
-	    return 0;
+	resize_nodes(tree, new_size);
     }
-
-    // The first node in an empty tree is made the left child of NIL.
-    if (tree->next_free == 1)
-	attach_leaf(tree, NIL, key, data, 0);
-    else
-	insert_node(tree, key, data);
-
-    return 1;
+    if (tree->next_free < tree->num_nodes) {
+        // The first node in an empty tree is made the left child of NIL.
+        if (tree->next_free == 1)
+            attach_leaf(tree, NIL, key, data, 0);
+        else
+            insert_node(tree, key, data);
+        result = 1;
+    }
+    if (tree->locking) rbtree_unlock(tree);
+    return result;
 }
 
 /*-----------------------------------------------------------------------------
@@ -571,14 +675,15 @@ rbtree_insert(nft_rbtree *tree,  void * key,  void * data)
 int
 rbtree_delete(nft_rbtree * tree,  void *key,  void **data)
 {
-    if ( tree == NULL) return 0;
+    if (!tree) return 0;
+
+    if (tree->locking) rbtree_wrlock(tree);
 
     RBTREE_COMPARE compare = tree->compare;
     nft_rbnode   * nodes   = tree->nodes;
     void         * token   = data ? *data : NULL;
-    int            comp    = -1;
+    long           comp    = -1;
     unsigned       node;
-
 
     // Find the given key.
     for (node = ROOT;
@@ -601,6 +706,8 @@ rbtree_delete(nft_rbtree * tree,  void *key,  void **data)
 	    (tree->min_nodes <= tree->num_nodes/2)  )
 	    resize_nodes(tree,  tree->num_nodes/2);
     }
+
+    if (tree->locking) rbtree_unlock(tree);
     return (comp == 0);
 }
 
@@ -614,12 +721,14 @@ rbtree_delete(nft_rbtree * tree,  void *key,  void **data)
 int
 rbtree_search(nft_rbtree *tree, void *key, void  **data)
 {
-    if ( tree == NULL) return 0;
+    if (!tree) return 0;
+
+    if (tree->locking) rbtree_rdlock(tree);
 
     RBTREE_COMPARE compare = tree->compare;
     nft_rbnode   * nodes   = tree->nodes;
     void         * token   = data ? *data : NULL;
-    int            comp    = -1;
+    long           comp    = -1;
     unsigned       node;
 
     // Find the given key.
@@ -631,6 +740,7 @@ rbtree_search(nft_rbtree *tree, void *key, void  **data)
     if ((comp == 0) && data)
 	*data = DATA(node);
 
+    if (tree->locking) rbtree_unlock(tree);
     return (comp == 0);
 }
 
@@ -645,11 +755,13 @@ rbtree_search(nft_rbtree *tree, void *key, void  **data)
 int
 rbtree_replace(nft_rbtree *tree, void *key, void *data)
 {
-    if ( tree == NULL) return 0;
+    if (!tree) return 0;
+
+    if (tree->locking) rbtree_rdlock(tree);
 
     RBTREE_COMPARE compare = tree->compare;
     nft_rbnode   * nodes   = tree->nodes;
-    int            comp    = -1;
+    long           comp    = -1;
     unsigned       node;
 
     // Find the given key.
@@ -661,6 +773,7 @@ rbtree_replace(nft_rbtree *tree, void *key, void *data)
     if (comp == 0)
 	DATA(node) = data;
 
+    if (tree->locking) rbtree_unlock(tree);
     return (comp == 0);
 }
 
@@ -670,12 +783,10 @@ rbtree_replace(nft_rbtree *tree, void *key, void *data)
  *
  *-----------------------------------------------------------------------------
  */
-int
+unsigned
 rbtree_count( nft_rbtree * tree)
 {
-    if (!tree) return 0;
-
-    return(tree->next_free - 1);
+    return(tree ? tree->next_free - 1 : 0);
 }
 
 /*-----------------------------------------------------------------------------
@@ -687,7 +798,9 @@ rbtree_count( nft_rbtree * tree)
 int
 rbtree_walk_first_r(nft_rbtree *tree, void  **key, void  **data, void **walk)
 {
-    if (tree == NULL) return 0;
+    if (!tree) return 0;
+
+    if (tree->locking) rbtree_rdlock(tree);
 
     nft_rbnode * nodes = tree->nodes;
     int          result = 0;
@@ -701,6 +814,7 @@ rbtree_walk_first_r(nft_rbtree *tree, void  **key, void  **data, void **walk)
 	*walk  = (void*)(long)node_successor(tree, node);
 	result = 1;
     }
+    if (tree->locking) rbtree_unlock(tree);
     return result;
 }
 
@@ -718,7 +832,9 @@ rbtree_walk_first_r(nft_rbtree *tree, void  **key, void  **data, void **walk)
 int
 rbtree_walk_next_r(nft_rbtree *tree, void **key, void **data, void **walk)
 {
-    if (tree == NULL) return 0;
+    if (!tree) return 0;
+
+    if (tree->locking) rbtree_rdlock(tree);
 
     nft_rbnode * nodes  = tree->nodes;
     unsigned     node   = (long) *walk;
@@ -731,6 +847,7 @@ rbtree_walk_next_r(nft_rbtree *tree, void **key, void **data, void **walk)
 	*walk  = (void*)(long)node_successor(tree, node);
 	result = 1;
     }
+    if (tree->locking) rbtree_unlock(tree);
     return result;
 }
 
@@ -783,7 +900,9 @@ rbtree_apply( nft_rbtree * tree,
 		   void (* apply)( void * key, void * obj, void * arg),
 		    void * arg)
 {
-    if (tree == NULL) return 0;
+    if (!tree) return 0;
+
+    if (tree->locking) rbtree_rdlock(tree);
 
     nft_rbnode * nodes = tree->nodes;
     unsigned     node;
@@ -796,6 +915,37 @@ rbtree_apply( nft_rbtree * tree,
 	num++;
 	(*apply)( KEY(node), DATA(node), arg);
     }
+    if (tree->locking) rbtree_unlock(tree);
+    return num;
+}
+
+/*-----------------------------------------------------------------------------
+ *
+ *	Like _apply(), but function takes args of (data, extra_arg).
+ *
+ *-----------------------------------------------------------------------------
+ */
+int
+rbtree_applyx( nft_rbtree * tree,
+                    void (* apply)(void * obj, void * arg),
+                     void * arg)
+{
+    if (!tree) return 0;
+
+    if (tree->locking) rbtree_rdlock(tree);
+
+    nft_rbnode * nodes = tree->nodes;
+    unsigned     node;
+    int          num = 0;
+
+    for (node  = node_first(tree);
+         node != NIL;
+         node  = node_successor(tree, node))
+    {
+        num++;
+        (*apply)( DATA(node), arg);
+    }
+    if (tree->locking) rbtree_unlock(tree);
     return num;
 }
 
@@ -852,8 +1002,9 @@ check_pointers(nft_rbtree *tree, unsigned node)
 int
 rbtree_validate( nft_rbtree * tree)
 {
-    nft_rbnode * nodes = tree->nodes;
     int result = 1;
+
+    nft_rbnode * nodes = tree->nodes;
 
     // The Nil node should never be colored red.
     assert(!RED((NIL)));
@@ -888,22 +1039,32 @@ rbtree_validate( nft_rbtree * tree)
     return result;
 }
 
+/* These two comparators should cover most needs.
+ */
+long rbtree_compare_pointers(void * h1, void * h2) { return (uintptr_t)h2 - (uintptr_t)h1; }
+long rbtree_compare_strings (char * s1, char * s2) { return (long) strcmp(s1, s2); }
+
+
 /******************************************************************************/
 /*******								*******/
 /*******		RBTREE PUBLIC APIS				*******/
 /*******								*******/
+/*******  These APIs are Nifty wrappers around the private APIs.	*******/
+/*******								*******/
 /******************************************************************************/
-
-/* These APIs are simply Nifty wrappers around the private APIs.
- * Note that the public APIs enforce concurrent-reades and exclusive writers.
- * I like this approach, because it gives the option to use the private API
- * with or without locking, depending on your needs.
- */
 
 nft_rbtree_h
 nft_rbtree_new(int min_nodes, RBTREE_COMPARE compare )
 {
-    return nft_rbtree_handle(rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), min_nodes, compare));
+    nft_rbtree * rbtree = rbtree_new(min_nodes, compare);
+    if (rbtree) {
+
+        // Enable locking, to make the handles safe for sharing.
+        rbtree_locking(rbtree, 1);
+
+        return nft_rbtree_handle(rbtree);
+    }
+    return NULL;
 }
 int
 nft_rbtree_free(nft_rbtree_h h)
@@ -927,30 +1088,19 @@ nft_rbtree_count(nft_rbtree_h h)
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_rdlock(&rbtree->rwlock); assert(r == 0);
-
 	result = rbtree_count(rbtree);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
 	nft_rbtree_discard(rbtree);
     }
     return result;
 }
-
-int
-nft_rbtree_validate(nft_rbtree_h h)
+void
+nft_rbtree_locking(nft_rbtree_h h, unsigned enabled)
 {
-    int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_rdlock(&rbtree->rwlock); assert(r == 0);
-
-	result = rbtree_validate(rbtree);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
+	rbtree_locking(rbtree, enabled);
 	nft_rbtree_discard(rbtree);
     }
-    return result;
 }
 int
 nft_rbtree_insert(nft_rbtree_h h, void  *key, void  *data)
@@ -958,11 +1108,7 @@ nft_rbtree_insert(nft_rbtree_h h, void  *key, void  *data)
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_wrlock(&rbtree->rwlock); assert(r == 0);
-
 	result = rbtree_insert(rbtree, key, data);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
 	nft_rbtree_discard(rbtree);
     }
     return result;
@@ -973,11 +1119,7 @@ nft_rbtree_replace(nft_rbtree_h h, void  *key, void  *data)
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_wrlock(&rbtree->rwlock); assert(r == 0);
-
 	result = rbtree_replace(rbtree, key, data);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
 	nft_rbtree_discard(rbtree);
     }
     return result;
@@ -988,11 +1130,7 @@ nft_rbtree_delete(nft_rbtree_h h, void  *key, void **data)
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_wrlock(&rbtree->rwlock); assert(r == 0);
-
 	result = rbtree_delete(rbtree, key, data);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
 	nft_rbtree_discard(rbtree);
     }
     return result;
@@ -1003,11 +1141,7 @@ nft_rbtree_search(nft_rbtree_h h, void  *key, void **data)
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_rdlock(&rbtree->rwlock); assert(r == 0);
-
 	result = rbtree_search(rbtree, key, data);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
 	nft_rbtree_discard(rbtree);
     }
     return result;
@@ -1018,11 +1152,7 @@ nft_rbtree_walk_first(nft_rbtree_h h, void **key, void **data)
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_rdlock(&rbtree->rwlock); assert(r == 0);
-
 	result = rbtree_walk_first(rbtree, key, data);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
 	nft_rbtree_discard(rbtree);
     }
     return result;
@@ -1033,11 +1163,7 @@ nft_rbtree_walk_next(nft_rbtree_h h, void **key, void **data)
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_rdlock(&rbtree->rwlock); assert(r == 0);
-
 	result = rbtree_walk_next(rbtree, key, data);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
 	nft_rbtree_discard(rbtree);
     }
     return result;
@@ -1048,11 +1174,7 @@ nft_rbtree_walk_first_r(nft_rbtree_h h, void **key, void **data, void **walk)
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_rdlock(&rbtree->rwlock); assert(r == 0);
-
 	result = rbtree_walk_first_r(rbtree, key, data, walk);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
 	nft_rbtree_discard(rbtree);
     }
     return result;
@@ -1063,11 +1185,7 @@ nft_rbtree_walk_next_r(nft_rbtree_h h, void **key, void **data, void **walk)
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_rdlock(&rbtree->rwlock); assert(r == 0);
-
 	result = rbtree_walk_next_r(rbtree, key, data, walk);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
 	nft_rbtree_discard(rbtree);
     }
     return result;
@@ -1078,16 +1196,22 @@ nft_rbtree_apply(nft_rbtree_h h, RBTREE_APPLY apply, void * arg)
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
     if (rbtree) {
-	int r = pthread_rwlock_rdlock(&rbtree->rwlock); assert(r == 0);
-
 	result = rbtree_apply(rbtree, apply, arg);
-
-	r = pthread_rwlock_unlock(&rbtree->rwlock); assert(r == 0);
 	nft_rbtree_discard(rbtree);
     }
     return result;
 }
-
+int
+nft_rbtree_validate(nft_rbtree_h h)
+{
+    int          result = 0;
+    nft_rbtree * rbtree = nft_rbtree_lookup(h);
+    if (rbtree) {
+	result = rbtree_validate(rbtree);
+	nft_rbtree_discard(rbtree);
+    }
+    return result;
+}
 
 /******************************************************************************/
 /******************************************************************************/
@@ -1120,18 +1244,33 @@ void print_tree(nft_rbtree * tree, unsigned node, int depth)
     }
 }
 
-
 static void
 test_basic(void)
 {
-    int    testn    = 20;
-    char * test[20] = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
-                           "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" };
-    void * key, * data;
+    // Test the variadic create
+    nft_rbtree * u = rbtree_vnew(8, rbtree_compare_strings,
+			"0", "zero",
+			"1", "one",
+			"2", "two",
+			"3", "three",
+			"4", "four",
+			NULL);
+    char * value;
+    rbtree_search(u,"0", (void**) &value);
+    assert(!strcmp(value,"zero"));
+    rbtree_search(u,"3", (void**) &value);
+    assert(!strcmp(value,"three"));
+    rbtree_free(u);
 
     printf("\nTesting basic operations\n");
 
-    nft_rbtree * t = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 10, (RBTREE_COMPARE)strcmp);
+    int    testn    = 20;
+    char * test[20] = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+                        "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" };
+    void * key, * data;
+    nft_rbtree  * t = rbtree_new(10, rbtree_compare_strings);
+
+    rbtree_locking(t, 1);    // Enable locking for thread-safety
 
     for (int i = 0; i < 10; i++)
 	rbtree_insert(t, test[i], test[i]);
@@ -1207,7 +1346,7 @@ test_basic(void)
     assert(0 == result);
 }
 
-static int
+static long
 strcmp_duplex(char *key1, char *key2, char *tok1, char *tok2)
 {
     int res = strcmp(key1, key2);
@@ -1278,7 +1417,7 @@ test_private_api(void)
      * in order to force a pass thru the offset code in
      * realloc-nodes.
      */
-    nft_rbtree * t = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 512, (RBTREE_COMPARE) strcmp);
+    nft_rbtree * t = rbtree_new(512, rbtree_compare_strings);
 
     /* Insert strings into tree  */
     MARK;			/* record start time */
@@ -1344,7 +1483,7 @@ test_handle_api(void)
      * in order to force a pass thru the offset code in
      * realloc-nodes.
      */
-    nft_rbtree_h h = nft_rbtree_new(512, (RBTREE_COMPARE) strcmp);
+    nft_rbtree_h h = nft_rbtree_new(512, rbtree_compare_strings);
 
     /* Insert strings into tree  */
     MARK;			/* record start time */
