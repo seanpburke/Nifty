@@ -1,5 +1,5 @@
 /******************************************************************************
- * (C) Copyright Xenadyne Inc, 2002 - 2013 ALL RIGHTS RESERVED.
+ * (C) Copyright Xenadyne Inc, 2002 - 2015 ALL RIGHTS RESERVED.
  *
  * Permission to use, copy, modify and distribute this software for
  * any purpose and without fee is hereby granted, provided that the
@@ -65,22 +65,21 @@
 #define MIN_SIZE   32
 
 /* All of the pending tasks are stored in a queue that is structured as a heap.
- * The tasks array is 1-based, so min[] must be sized to MIN_SIZE + 1.
  */
 typedef struct heap {
-    unsigned    size;		 // size of heap (number of nodes)
-    unsigned    count;		 // number of nodes in use
+    long        size;		 // size of tasks array
+    long        count;		 // number of tasks in use
     nft_task ** tasks;		 // array of task pointers
-    nft_task  * min[MIN_SIZE+1]; // initial minimal array
+    nft_task  * min[MIN_SIZE];	 // initial minimal array
 } heap_t;
 
 
 // Forward prototypes for the heap functions.
 static void		heap_init  (heap_t *heap);
 static int		heap_insert(heap_t *heap, nft_task *  item);
-static unsigned int	heap_top   (heap_t *heap, nft_task ** item);
+static long		heap_top   (heap_t *heap, nft_task ** item);
 static int		heap_pop   (heap_t *heap, nft_task ** item);
-static void		heap_delete(heap_t *heap, unsigned    index);
+static void		heap_delete(heap_t *heap, long        index);
 
 
 // Local static data.
@@ -272,6 +271,7 @@ nft_task_create(const char    * class,
 
     // Override the nft_core destructor with our own.
     task->core.destroy = nft_task_destroy;
+    task->index        = -1;
     task->action       = nft_task_action;
     task->interval     = interval;
     task->function     = function;
@@ -362,20 +362,21 @@ nft_task_cancel_task(nft_task * task)
     // Lock the queue.
     rc = pthread_mutex_lock(&QueueMutex);     assert(rc == 0);
 
-    // Note that queue entries start at 1, not zero.
-    for (unsigned i = 1; i <= Queue.count; i++)
-	if (Queue.tasks[i] == task)
-	{
-	    // Remove the task from the queue.
-	    heap_delete(&Queue, i);
+    if (task->index >= 0 && task->index < Queue.count) {
+        assert(Queue.tasks[task->index] == task);
 
-	    // Discard the reference that was stored in the queue.
-	    // This reference was created in nft_task_schedule by nft_task_create().
-	    nft_task_discard(task);
+        if (Queue.tasks[task->index] == task)
+        {
+            // Remove the task from the queue.
+            heap_delete(&Queue, task->index);
 
-	    result = 1;
-	    break;
-	}
+            // Discard the reference that was stored in the queue.
+            // This reference was created in nft_task_schedule by nft_task_create().
+            nft_task_discard(task);
+
+            result = 1;
+        }
+    }
     rc = pthread_mutex_unlock(&QueueMutex); assert(rc == 0);
     return result;
 }
@@ -497,6 +498,8 @@ task_comp(nft_task * t1, nft_task * t2)
     {   void * temp    = heap->tasks[x];	\
 	heap->tasks[x] = heap->tasks[y];	\
 	heap->tasks[y] = temp;			\
+        heap->tasks[x]->index = x;		\
+        heap->tasks[y]->index = y;		\
     }
 
 /* upheap()
@@ -507,13 +510,13 @@ task_comp(nft_task * t1, nft_task * t2)
  * heap condition is satisfied.
  */
 static void
-upheap(heap_t *heap, unsigned int child)
+upheap(heap_t *heap, long child)
 {
-    unsigned int parent;
+    long parent;
 
-    while (child > 1)
+    while (child > 0)
     {
-	parent = child >> 1;
+	parent = (child - 1) >> 1;
 
 	/* If the parent is less than the child,
 	 * exchange parent and child nodes in the heap.
@@ -534,20 +537,20 @@ upheap(heap_t *heap, unsigned int child)
  * element in its place, then calls this function to restore the heap.
  */
 static void
-downheap(heap_t *heap, unsigned int i)
+downheap(heap_t *heap, long i)
 {
-    unsigned int child1, child2, largest;
+    long child1, child2, largest;
 
-    while ( i <= (heap->count >> 1))	/* then i has at least one child */
+    while ( i < (heap->count >> 1)) // i has at least one child
     {
-	child1 = i << 1;
-	child2 = child1 + 1;
+	child1 = (i << 1) + 1;
+	child2 = child1   + 1;
 
 	/* Find the largest of the two children of i. If child2 is not
 	 * within the heap, then child1 is by default.
 	 */
 	largest = child1;
-	if ((child2 <= heap->count) &&
+	if ((child2 < heap->count) &&
 	    (COMPARE_NODES(child1, child2) < 0))
 	    largest = child2;
 
@@ -578,7 +581,7 @@ heap_init(heap_t * heap)
  * Returns true on success, else failure.
  */
 static int
-heap_resize(heap_t *heap, int nsize)
+heap_resize(heap_t *heap, long nsize)
 {
     nft_task ** tasks;
 
@@ -590,16 +593,16 @@ heap_resize(heap_t *heap, int nsize)
     {
 	// Growing from minimal size, need to malloc tasks.
 	assert(heap->tasks == heap->min);
-	if (!(tasks = malloc((nsize + 1) * sizeof(nft_task *))))
+	if (!(tasks = malloc(nsize * sizeof(nft_task *))))
 	    return 0;
-	memcpy(tasks + 1, heap->tasks + 1, MIN_SIZE * sizeof(nft_task *));
+	memcpy(tasks, heap->tasks, MIN_SIZE * sizeof(nft_task *));
 	heap->tasks = tasks;
     }
     else if (nsize == MIN_SIZE)
     {
 	// Shrinking to minimal size, we can free tasks.
 	assert(heap->tasks != heap->min);
-	memcpy(heap->min + 1, heap->tasks + 1, MIN_SIZE * sizeof(nft_task *));
+	memcpy(heap->min, heap->tasks, MIN_SIZE * sizeof(nft_task *));
 	free(heap->tasks);
 	heap->tasks = heap->min;
     }
@@ -607,7 +610,7 @@ heap_resize(heap_t *heap, int nsize)
     {
 	// Reallocate the tasks array. Remember that the zeroth element is not used, so alloc nsize+1 elements.
 	assert(heap->tasks != heap->min);
-	if (!(tasks = realloc(heap->tasks, (nsize + 1) * sizeof(nft_task *))))
+	if (!(tasks = realloc(heap->tasks, nsize * sizeof(nft_task *))))
 	    return 0;
 	heap->tasks = tasks;
     }
@@ -627,18 +630,16 @@ heap_resize(heap_t *heap, int nsize)
 static int
 heap_insert(heap_t *heap, nft_task * item)
 {
-    /* Do we need to realloc heap->tasks?
-     * Remember that the zeroth element is not used.
-     */
+    // Do we need to realloc heap->tasks?
     if (heap->count == heap->size)
 	if (!heap_resize(heap, heap->size << 1))
 	    return 0;
 
     assert(heap->count < heap->size);
 
-    heap->count++;
-    heap->tasks[heap->count] = item;
-    upheap(heap, heap->count);
+    item->index = heap->count++;
+    heap->tasks[item->index] = item;
+    upheap(heap, item->index);
     return 1;
 }
 
@@ -647,10 +648,10 @@ heap_insert(heap_t *heap, nft_task * item)
  * Returns the top item on the heap (or NULL), without removing it.
  * Returns the heap count.
  */
-static unsigned int
+static long
 heap_top(heap_t *heap, nft_task ** itemp)
 {
-    if (itemp) *itemp = heap->count ? heap->tasks[1] : NULL ;
+    if (itemp) *itemp = heap->count ? heap->tasks[0] : NULL ;
     return heap->count;
 }
 
@@ -662,44 +663,50 @@ heap_top(heap_t *heap, nft_task ** itemp)
 static int
 heap_pop(heap_t *heap, nft_task ** itemp)
 {
-    int result = 0;
+    nft_task * task = heap->count ? heap->tasks[0] : NULL ;
 
-    if (itemp) *itemp = heap->count ? heap->tasks[1] : NULL ;
-    if (heap->count) {
-	SWAP_NODES( 1, heap->count)
-	heap->count--;
-	downheap(heap, 1);
-	result++;
+    if (itemp) *itemp = task;
+
+    if (task) {
+	task->index = -1;
+        if (--heap->count) {
+            // Replace the task at 0 with the last task
+            heap->tasks[0] = heap->tasks[heap->count];
+            heap->tasks[0]->index = 0;
+            downheap(heap, 0);
+        }
     }
     // Realloc heap->tasks if less than one quarter full.
     if ((heap->count  <  (heap->size >> 2)) &&
 	(MIN_SIZE     <= (heap->size >> 1)))
 	heap_resize(heap, heap->size >> 1);
 
-    return result;
+    return task ? 1 : 0;
 }
 
 /* heap_delete
  *
- * Deletes the node at index i in the heap. Refuses to delete 0.
+ * Deletes the node at index i in the heap.
  */
 static void
-heap_delete(heap_t *heap, unsigned int index)
+heap_delete(heap_t *heap, long index)
 {
-    assert((index > 0) && (index <= heap->count));
+    assert(heap->count > 0);
+    assert(index >= 0 && index < heap->count);
 
-    if (index > 0 && index < heap->count)
+    heap->tasks[index]->index = -1;
+
+    // Removing the last node requires no further work.
+    if (index < --heap->count)
     {
 	int comp = COMPARE_NODES(index, heap->count);
-	SWAP_NODES( index, heap->count)
-	heap->count--;
 
-	if      (comp > 0) downheap(heap, index);
+	// Replace the task at index with the last task
+	heap->tasks[index] = heap->tasks[heap->count];
+	heap->tasks[index]->index = index;
+
+	if	(comp > 0) downheap(heap, index);
 	else if (comp < 0)   upheap(heap, index);
-    }
-    else if (index == heap->count)
-    {
-	heap->count--;
     }
 
     // Realloc heap->tasks if less than one quarter full.
@@ -859,8 +866,8 @@ test_basic() {
 	nft_task_h task = nft_task_schedule((struct timespec){0,0}, interval, dot_task, arg);
 	assert(task);
 
-	// Cancel from the main thread after five seconds.
-	for (int i = 0; i < 5; i++) {
+	// Cancel from the main thread after two seconds.
+	for (int i = 0; i < 2; i++) {
 	    sleep(1);
 	    fflush(stdout);
 	}
@@ -879,9 +886,9 @@ test_basic() {
 	nft_task_h      task = nft_task_schedule((struct timespec){0,0}, interval, dot_task, arg);
 	assert(task);
 
-	// Schedule a task to cancel the dot_task in 5 seconds.
+	// Schedule a task to cancel the dot_task in 3 seconds.
 	struct timespec absolute = nft_gettime();
-	absolute.tv_sec += 5;
+	absolute.tv_sec += 3;
 	nft_task_schedule(absolute, (struct timespec){0,0}, cancel_task, task);
 
 	Waiting = 1;
@@ -1129,6 +1136,15 @@ void test_nft_task_pool()
 }
 
 /****************************************************************************************/
+
+/* Timing stuff.
+ */
+struct timespec mark, done;
+#define MARK	mark = nft_gettime()
+#define TIME	done = nft_gettime()
+#define ELAPSED ((done.tv_sec * 1.0 + done.tv_nsec * 0.000000001) - \
+                 (mark.tv_sec * 1.0 + mark.tv_nsec * 0.000000001)   )
+
 void
 test_heap()
 {
@@ -1137,9 +1153,10 @@ test_heap()
     heap_t heap;
     heap_init(&heap);
 
-    printf("Testing the heap...");
-
-    for (int i = 0; i < 10000; i++)
+    printf("Testing heap_insert and heap_pop...");
+    MARK;
+    int count = 1000000;
+    for (int i = 0; i < count; i++)
     {
 	nft_task * task = malloc(sizeof(nft_task));
 
@@ -1148,13 +1165,35 @@ test_heap()
 	task->abstime.tv_nsec = (i % 1000) * 1000000;
 	heap_insert(&heap, task);
     }
-    for (int i = 0; i < 10000; i++)
+    for (int i = 0; i < count; i++)
     {
 	nft_task * task;
-	heap_pop(&heap, &task);
+	assert(heap_pop(&heap, &task));
+	assert(task->index == -1);
 	assert(task->abstime.tv_sec  == (i / 1000));
 	assert(task->abstime.tv_nsec == (i % 1000) * 1000000);
 	free(task);
+    }
+    TIME; // compute elapsed time
+    printf(" Passed!\n");
+    fprintf(stderr, "heap processed %d tasks in %.3f seconds\n", count, ELAPSED);
+
+    printf("Testing heap_delete...");
+    nft_task * tasks[100];
+    for (int i = 0; i < 100; i++)
+    {
+	tasks[i] = malloc(sizeof(nft_task));
+	tasks[i]->abstime.tv_sec  = lrand48() % 1000;
+	tasks[i]->abstime.tv_nsec = 0;
+	heap_insert(&heap, tasks[i]);
+    }
+    for (int i = 0; i < 100; i++) assert(heap.tasks[i]->index == i);
+    for (int i = 0; i < 100; i++)
+    {
+	assert(heap.tasks[tasks[i]->index] == tasks[i]);
+	heap_delete(&heap, tasks[i]->index);
+	assert(tasks[i]->index == -1);
+	free(tasks[i]);
     }
     printf(" Passed!\n");
 }
