@@ -271,6 +271,7 @@ struct nft_rbtree
 };
 
 nft_rbtree * rbtree_new         (int min_nodes, RBTREE_COMPARE compare);
+nft_rbtree * rbtree_vnew        (int min_nodes, RBTREE_COMPARE compare, void * key, ...);
 void         rbtree_free        (nft_rbtree * tree);
 unsigned     rbtree_count       (nft_rbtree *);
 void         rbtree_locking     (nft_rbtree *, unsigned enabled);

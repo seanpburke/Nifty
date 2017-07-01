@@ -41,6 +41,7 @@
  */
 #include <assert.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -465,6 +466,27 @@ nft_rbtree *
 rbtree_new(int min_nodes, RBTREE_COMPARE compare )
 {
     return rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), min_nodes, compare);
+}
+
+/*-----------------------------------------------------------------------------
+ *
+ * rbtree_vnew		Create a new rbtree variadic
+ *
+ *-----------------------------------------------------------------------------
+ */
+nft_rbtree *
+rbtree_vnew (int num, RBTREE_COMPARE compare, void * key, ...)
+{
+    nft_rbtree * tree = rbtree_new(num, compare);
+
+    va_list ap;
+    for (va_start( ap, key);  key;  key = va_arg(ap, void*)) {
+        void * val = va_arg(ap, void*);
+        rbtree_insert(tree, key, val);
+    }
+    va_end(ap);
+
+    return tree;
 }
 
 /*-----------------------------------------------------------------------------
@@ -1225,14 +1247,28 @@ void print_tree(nft_rbtree * tree, unsigned node, int depth)
 static void
 test_basic(void)
 {
-    int    testn    = 20;
-    char * test[20] = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
-                           "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" };
-    void * key, * data;
+    // Test the variadic create
+    nft_rbtree * u = rbtree_vnew(8, rbtree_compare_strings,
+			"0", "zero",
+			"1", "one",
+			"2", "two",
+			"3", "three",
+			"4", "four",
+			NULL);
+    char * value;
+    rbtree_search(u,"0", (void**) &value);
+    assert(!strcmp(value,"zero"));
+    rbtree_search(u,"3", (void**) &value);
+    assert(!strcmp(value,"three"));
+    nft_rbtree_discard(u);
 
     printf("\nTesting basic operations\n");
 
-    nft_rbtree * t = rbtree_new(10, rbtree_compare_strings);
+    int    testn    = 20;
+    char * test[20] = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
+                        "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" };
+    void * key, * data;
+    nft_rbtree  * t = rbtree_new(10, rbtree_compare_strings);
 
     rbtree_locking(t, 1);    // Enable locking for thread-safety
 
