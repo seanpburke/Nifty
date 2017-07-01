@@ -777,21 +777,22 @@ poll_input(void * arg)
 	// by making the workers call _lookup/_discard.
 	//
 	nft_string * object = nft_string_new(buff);
-	if ((rc = nft_queue_add(q, object->core.handle))) break;
+        nft_string_h handle = nft_string_handle(object);
+	if ((rc = nft_queue_add(q, handle))) break;
 	countin++;
     }
     fputs("input thread done\n", stderr);
     return (void*) rc;
 }
 
-/* Multiple worker threads are spawned that read messages
- * from the raw message queue, convert them to upper case,
- * and add them to the output queue.
+/* Multiple worker threads are spawned that read nft_string handles from the input queue,
+ * convert the strings to upper case, and add them to the output queue.
  */
 static void *
 worker_thread(void * index)
 {
-    long         rc = -1;
+    int  count = 0;
+    long rc    = -1;
     nft_string_h handle;
     while ((handle = nft_queue_pop(input_Q))) {
 	nft_string * object = nft_string_lookup(handle);
@@ -800,8 +801,9 @@ worker_thread(void * index)
 	    nft_string_discard(object);
 	}
 	if ((rc = nft_queue_add(output_Q, handle))) break;
+        count++;
     }
-    fprintf(stderr, "worker_thread[%ld] done\n", (long) index);
+    fprintf(stderr, "worker_thread[%ld] processed %d strings\n", (long) index, count);
     return (void*) rc;
 }
 
