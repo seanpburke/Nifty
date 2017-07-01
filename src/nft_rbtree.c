@@ -1260,7 +1260,7 @@ test_basic(void)
     assert(!strcmp(value,"zero"));
     rbtree_search(u,"3", (void**) &value);
     assert(!strcmp(value,"three"));
-    nft_rbtree_discard(u);
+    rbtree_free(u);
 
     printf("\nTesting basic operations\n");
 
