@@ -224,28 +224,24 @@ int nft_rbtree_walk_next_r  ( nft_rbtree_h tree,
 */
 
 //______________________________________________________________________________
-//
+// Test tree's pointers and key ordering integrity.
+// Returns TRUE (1) if the tree is valid, else 0.
 int nft_rbtree_validate (nft_rbtree_h tree);
-/*
- Test tree's pointers and key ordering integrity.
- Returns TRUE (1) if the tree is valid, else 0.
-*/
 
-//______________________________________________________________________________
-//
+// Return the number of items in a tree.
 int nft_rbtree_count( nft_rbtree_h tree);
-/*
- Return the number of items in a tree.
-*/
+
+// Enable shared-readers/single-writer locking for this rbtree.
+void nft_rbtree_locking(nft_rbtree_h h, unsigned enabled);
 
 
 /*______________________________________________________________________________
  *
  * These are the private, direct-access APIs. You can use them when subclassing,
  * and in situations where you wish to avoid the overhead of the handle-based API.
- * Note that these APIs do not use the readers/writer lock - that happens in the
- * handle-based calls. So, it is up to you, whether and how to use the rwlock,
- * when using these APIs.
+ * Note that unlike the handle-based API's nft_rbtree_new(), the rbtree_new()
+ * function returns an rbtree whose shared-readers/single-writer lock is disabled.
+ * Use rbtree_locking() to enable the readers/writer lock.
  *______________________________________________________________________________
  */
 struct nft_rbnode
