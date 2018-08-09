@@ -84,7 +84,7 @@ handle_hash(nft_handle handle, unsigned modulo)
  *	nft_handle   nft_handle_alloc(nft_core * object);
  *	nft_core   * nft_handle_lookup(nft_handle handle);
  *	int          nft_handle_discard(nft_handle handle);
- *	nft_handle * nft_handle_apply();
+ *	int          nft_handle_apply();
  *
  *  The mutex-locked handle map that is implemented here,
  *  is a good compromise for simplicity, efficiency and portability.
@@ -252,11 +252,17 @@ nft_handle_discard(nft_core * object)
     return result;
 }
 
-void
+// Apply a function to all live objects, returning a count of objects.
+// If you only wish to count the objects, you can pass a null function.
+// Because the function can visit objects that are only partially constructed,
+// there is very little that you can safely do in the function.
+int
 nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char * class, void * argument)
 {
+    int count = 0;
+
     // Ensure that the handle table and mutex are initialized.
-    if (nft_handle_init()) return;
+    if (nft_handle_init()) return -1;
 
     int rc = pthread_mutex_lock(&HandleMutex); assert(rc == 0);
 
@@ -264,11 +270,14 @@ nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char 
     {
 	nft_handle_map * slot = &HandleMap[i];
 	if (slot->refcount > 0)	{
-	    // Call function, passing object and argument.
-	    function(slot->object, class, argument);
+            count++;
+            if (function)
+                function(slot->object, class, argument);
 	}
     }
     rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
+
+    return count;
 }
 
 #else  // NFT_LOCKLESS defined
@@ -279,7 +288,7 @@ nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char 
  *	nft_handle   nft_handle_alloc(nft_core * object);
  *	nft_core   * nft_handle_lookup(nft_handle handle);
  *	int          nft_handle_discard(nft_handle handle);
- *	nft_handle * nft_handle_apply();
+ *	int	     nft_handle_apply();
  *
  *  The implementation below uses GCC builtin atomic operations to implement
  *  lockless management of the handle table. It is experimental, and only
@@ -571,28 +580,33 @@ nft_handle_discard(nft_core * object)
     return result;
 }
 
-void
+// Apply a function to all live objects, returning a count of objects.
+// If you only wish to count the objects, you can pass a null function.
+// Because the function can visit objects that are only partially constructed,
+// there is very little that you can safely do in the function.
+int
 nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char * class, void * argument)
 {
+    int count = 0;
+
     // Ensure that the handle table and mutex are initialized.
-    if (nft_handle_init()) return;
+    if (nft_handle_init()) return -1;
 
     int locked = handle_rdlock();
 
     for(unsigned i = 0; i < HandleMapSize; i++)
     {
 	nft_handle_map * slot = &HandleMap[i];
-	if (handle_map_increment(slot) > 0)
-	{
-	    nft_core * object = slot->object;
-
-	    // Call function, passing object, class and argument.
-	    function(object, class, argument);
-
+	if (handle_map_increment(slot) > 0) {
+            count++;
+            if (function)
+                function(slot->object, class, argument);
 	    handle_map_decrement(slot);
 	}
     }
     if (locked) handle_unlock();
+
+    return count;
 }
 
 #endif // NFT_LOCKLESS
@@ -615,48 +629,58 @@ nft_handle_apply(void (*function)(nft_core *, const char *, void *), const char 
 void destroy(nft_core * core) { }
 nft_core dummy = { .class = "nft_core", .handle = NULL, .destroy = destroy };
 
-// Define an apply function to count handles.
-int counter = 0;
-void apply(nft_core * core, const char * class , void * param)
-{
-    counter++;
-}
-
 #define MAXIMUM (1 << NFT_HMAPSZMAX)
 nft_handle handles[MAXIMUM];
 nft_core   cores[MAXIMUM];
 
+/* Timing stuff.
+ */
+struct timespec mark, done;
+#define MARK	mark = nft_gettime()
+#define TIME	done = nft_gettime()
+#define ELAPSED ((done.tv_sec * 1.0 + done.tv_nsec * 0.000000001) - \
+                 (mark.tv_sec * 1.0 + mark.tv_nsec * 0.000000001)   )
+
 int
 main(int argc, char *argv[])
 {
+    int i;
+
     // alloc
-    for (int i = 0; i < HandleMapMax; i++) {
+    MARK;
+    for (i = 0; i < HandleMapMax; i++) {
         cores[i]   = dummy;
         handles[i] = nft_handle_alloc(&cores[i]);
         assert(cores[i].handle == handles[i]);
     }
+    TIME;
+    printf("Time to alloc  %d handles: %.3f\n", i, ELAPSED);
 
     // lookup/discard
-    for (int i = 0; i < HandleMapMax; i++) {
+    MARK;
+    for (i = 0; i < HandleMapMax; i++) {
         nft_core * core  = nft_handle_lookup(handles[i]);
         assert(&cores[i] == core);
         assert(0 == nft_handle_discard(core));
     }
+    TIME;
+    printf("Time to lookup %d handles: %.3f\n", i, ELAPSED);
 
     // apply
-    counter = 0;
-    nft_handle_apply(apply, "nft_core", NULL);
-    assert(HandleMapMax == counter);
+    i = nft_handle_apply(NULL, "nft_core", NULL);
+    assert(HandleMapMax == i);
 
-    // discard
-    for (int i = 0; i < HandleMapMax; i++) {
+    // free
+    MARK;
+    for (i = 0; i < HandleMapMax; i++) {
         assert(0 == nft_handle_discard(&cores[i]));
     }
+    TIME;
+    printf("Time to free   %d handles: %.3f\n", i, ELAPSED);
 
     // apply
-    counter = 0;
-    nft_handle_apply(apply, "nft_core", NULL);
-    assert(0 == counter);
+    i = nft_handle_apply(NULL, "nft_core", NULL);
+    assert(0 == i);
 
     printf("nft_handle: All tests passed.\n");
     exit(0);
