@@ -51,6 +51,10 @@ static void handle_once(void);
 int
 nft_handle_init(void)
 {
+    // This code assumes that the handle table size is 32 bits.
+    assert(NFT_HMAPSZMAX <= 31);
+    assert(NFT_HMAPSZINI <= NFT_HMAPSZMAX);
+
     // Ensure that the handle table and mutex are initialized.
     int rc = pthread_once(&HandleOnce, handle_once); assert(rc == 0);
 
@@ -153,7 +157,7 @@ nft_handle_alloc(nft_core * object)
     // Only positive values are valid handles - when the NextHandle rolls over,
     // we reset it to 1. This is important, as it allows handles to be compared
     // by subtraction for sorting purposes, without overflow.
-    static ptrdiff_t NextHandle = 1;
+    static ptrdiff_t NextHandle = 0;
 
     // Ensure that the handle table and mutex are initialized.
     if (nft_handle_init()) return NULL;
@@ -170,16 +174,15 @@ nft_handle_alloc(nft_core * object)
 	// This is similar to a hash table that uses linear probing, with the difference
 	// that instead of handling hash collisions, we are searching for a new handle
 	// which has no hash collision.
-	for (unsigned i = 0; i < limit ; i++, NextHandle++) {
-	    if (NextHandle > 0) {
-		unsigned index = handle_hash((nft_handle)NextHandle, HandleMapSize);
-		if (HandleMap[index].refcount == 0) {
-		    object->handle = handle = (nft_handle) NextHandle++;
-		    HandleMap[index] = (nft_handle_map){ 1, object };
-		    break;
-		}
+	for (unsigned i = 0; i < limit ; i++) {
+	    if (++NextHandle <= 0)
+                NextHandle = 1;
+            unsigned index = handle_hash((nft_handle)NextHandle, HandleMapSize);
+            if (HandleMap[index].refcount == 0) {
+                object->handle = handle = (nft_handle) NextHandle;
+                HandleMap[index] = (nft_handle_map){ 1, object };
+                break;
 	    }
-	    else NextHandle = 1;
 	}
     } while (!handle && handle_map_enlarge());
     rc = pthread_mutex_unlock(&HandleMutex); assert(rc == 0);
@@ -452,18 +455,23 @@ static nft_handle
 handle_next(void)
 {
     // We will increment this counter to generate a sequence of unique handles.
-    static ptrdiff_t NextHandle = 1;
+    static ptrdiff_t NextHandle = 0;
 
-    // Use gcc atomic builtin to increment NextHandle, so that no mutex is needed.
-    nft_handle   handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
+    nft_handle handle;
+    do {
+        // Use gcc atomic builtin to increment NextHandle, so that no mutex is needed.
+	handle = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
 
-    // Only positive numbers are valid handles, so reset on rollover.
-    if (NextHandle <= 0) {
-	NextHandle = 1;
-	__sync_synchronize();
-    }
-    if (handle <= 0)
-	handle  = (nft_handle) __sync_fetch_and_add(&NextHandle, 1);
+        // Only positive numbers are valid handles, so reset NextHandle on rollover.
+        // Note that there is a race here, and two threads could both reset NextHandle.
+        // At worst, this function would return the same handle in both threads,
+        // but the collision would be resolved in nft_handle_alloc - one of them
+        // would have to try again.
+        if (handle <= 0) {
+            if (NextHandle < 0)
+                NextHandle = 0;
+        }
+    } while (handle <= 0);
 
     return handle;
 }
@@ -490,14 +498,14 @@ nft_handle_alloc(nft_core * object)
 	for (unsigned n = 0; n < limit ; n++)
 	{
 	    // Allocate a fresh unique handle and try again.
-	    nft_handle       temp  = handle_next();
-	    unsigned         index = handle_hash(temp, HandleMapSize);
+	    nft_handle       next  = handle_next();
+	    unsigned         index = handle_hash(next, HandleMapSize);
 	    nft_handle_map * slot  = &HandleMap[index];
 
 	    // If this map slot is not in use, allocate it to this handle.
 	    // Free slots have a reference count -1, and slots with zero are "busy".
 	    if (__sync_bool_compare_and_swap (&slot->refcount, -1, 0)) {
-		object->handle = handle = temp;
+		object->handle = handle = next;
 		slot->object   = object;
 		__sync_bool_compare_and_swap (&slot->refcount,  0, 1);
 		break;

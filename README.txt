@@ -207,7 +207,7 @@ possible. The goals are to:
 * Use reference-counts to manage shared pointers,
 * Classes publish handles, keeping pointers private.
 
-The idea is that every object in the system will inherit from this core class:
+The idea is that every object in the framework will inherit from this core class:
 
     typedef struct nft_core {
         const char  * class;
@@ -220,7 +220,7 @@ as the very first element of the subclass. This is single-inheritance,
 and in consequence, a pointer to any subclass is also a pointer to its
 parent class, and grandparent class, etc.
 
-To demonstate, here is an example subclass, consisting of a simple
+To demonstrate, here is an example subclass, consisting of a simple
 shared (reference-counted) string:
 
 typedef struct nft_string
@@ -240,7 +240,7 @@ nft_core_lookup() to obtain a pointer to the object instance:
 The object's reference count is incremented whenever nft_core_lookup is
 applied to a valid handle. This ensures that the pointer you receive
 from the lookup cannot be freed until you explicitly release your
-reference,  via nft_core_discard:
+reference, via nft_core_discard:
 
     nft_core_discard( object_reference );
 
@@ -322,9 +322,9 @@ The subclass destructor must call its parent destructor as the very last step:
     }
 
 So, to create an instance of nft_string, we simply invoke the constructor,
-passing that class string, size, and the 'substring' parameter:
+passing the full class name, object size, and the string text:
 
-    nft_string * this = nft_string_create("nft_core:nft_string", sizeof(nft_string), "substring");
+    nft_string * this = nft_string_create("nft_core:nft_string", sizeof(nft_string), "apple");
 
 That is all there is to it. This is the entire inheritance system in the
 libnifty framework. We have not yet used a single macro, but of course
@@ -345,7 +345,7 @@ from nft_string:
     #define nft_substring_class nft_string_class ":nft_substring"
 
 The benefit should now be apparent: if nft_string changes its place in the
-class hierarchy, these changes will propogate automatically to the value
+class hierarchy, these changes will propagate automatically to the value
 of nft_substring_class.
 
 Given the nft_string_class macro, the nft_string_cast() function that we
