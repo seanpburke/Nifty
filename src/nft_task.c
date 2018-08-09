@@ -546,16 +546,16 @@ downheap(heap_t *heap, long i)
 	child1 = (i << 1) + 1;
 	child2 = child1   + 1;
 
-	/* Find the largest of the two children of i. If child2 is not
-	 * within the heap, then child1 is by default.
+	/* Find the largest of the two children of i.
+	 * If child2 is not within the heap, then child1 is by default.
 	 */
 	largest = child1;
 	if ((child2 < heap->count) &&
 	    (COMPARE_NODES(child1, child2) < 0))
 	    largest = child2;
 
-	/* If i is less than its largest child, then exchange contents of i
-	 * and largest, and repeat the process at largest.
+	/* If i is less than its largest child, then exchange contents
+	 * of i and largest, and repeat the process at largest.
 	 */
 	if (COMPARE_NODES(i, largest) < 0)
 	    SWAP_NODES(i, largest)
@@ -608,7 +608,7 @@ heap_resize(heap_t *heap, long nsize)
     }
     else
     {
-	// Reallocate the tasks array. Remember that the zeroth element is not used, so alloc nsize+1 elements.
+	// Reallocate the tasks array.
 	assert(heap->tasks != heap->min);
 	if (!(tasks = realloc(heap->tasks, nsize * sizeof(nft_task *))))
 	    return 0;
