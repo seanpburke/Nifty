@@ -122,7 +122,7 @@ static unsigned
 node_successor(nft_rbtree * tree, unsigned node)
 {
     assert(node != NIL);
-    assert(node  < tree->num_nodes);
+    assert(node  < tree->next_free);
 
     nft_rbnode * nodes = tree->nodes;
 
@@ -632,13 +632,12 @@ void rbtree_destroy(nft_core * core)
 int
 rbtree_insert(nft_rbtree *tree,  void * key,  void * data)
 {
-    if (!tree) return 0;
-
     int result = 0;
 
+    if (!tree) return 0;
     if (tree->locking) rbtree_wrlock(tree);
 
-    assert(tree->next_free >= 0);
+    assert(tree->next_free > 0);
     assert(tree->next_free <= tree->num_nodes);
 
     // Ensure that there is room to insert a key.
@@ -811,7 +810,7 @@ rbtree_walk_first_r(nft_rbtree *tree, void  **key, void  **data, void **walk)
     {
 	if (key)  *key  = KEY(node);
 	if (data) *data = DATA(node);
-	*walk  = (void*)(long)node_successor(tree, node);
+	*walk  = (void*)(uintptr_t)node_successor(tree, node);
 	result = 1;
     }
     if (tree->locking) rbtree_unlock(tree);
@@ -837,14 +836,18 @@ rbtree_walk_next_r(nft_rbtree *tree, void **key, void **data, void **walk)
     if (tree->locking) rbtree_rdlock(tree);
 
     nft_rbnode * nodes  = tree->nodes;
-    unsigned     node   = (long) *walk;
+    unsigned     node   = (uintptr_t) *walk;
     int          result = 0;
+
+    // Have nodes have been deleted, or is *walk uninitialized?
+    assert(node < tree->next_free);
+    if (node >= tree->next_free) return 0;
 
     if (!IS_NIL(node))
     {
 	if (key)  *key  = KEY(node);
 	if (data) *data = DATA(node);
-	*walk  = (void*)(long)node_successor(tree, node);
+	*walk  = (void*)(uintptr_t)node_successor(tree, node);
 	result = 1;
     }
     if (tree->locking) rbtree_unlock(tree);
@@ -1302,7 +1305,7 @@ test_basic(void)
     {	/* This loop randomly inserts and deletes keys, while running the validator.
 	 */
 	void * lastkey = NULL;
-	int limit = 10 * testn ;
+	int limit = 1000000;
 	int j     = 0;
 
 	srand48(time(0));	/* seed the random number generator */
