@@ -100,11 +100,17 @@ subclass * subclass##_lookup(subclass##_h h) \
 int subclass##_discard(subclass * sc) \
 { return nft_core_discard((nft_core*) sc); }
 
-// Note that static is a parameter, which can be empty.
-#define NFT_DEFINE_WRAPPERS(subclass, static) \
+/* Note that static is a parameter, which can be 'static', 'extern' or empty.
+   To suppress unused-function warnings, wrap these definitions in a pragma.
+   _Pragma() requires C99. See https://gcc.gnu.org/onlinedocs/cpp/Pragmas.html
+*/
+#define NFT_DEFINE_WRAPPERS(subclass,static) \
+_Pragma("GCC diagnostic push") \
+_Pragma("GCC diagnostic ignored \"-Wunused-function\"") \
 static NFT_DEFINE_CAST(subclass)    \
 static NFT_DEFINE_HANDLE(subclass)  \
 static NFT_DEFINE_LOOKUP(subclass)  \
-static NFT_DEFINE_DISCARD(subclass)
+static NFT_DEFINE_DISCARD(subclass) \
+_Pragma("GCC diagnostic pop")
 
 #endif // _NFT_CORE_H_

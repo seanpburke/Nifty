@@ -1016,10 +1016,10 @@ typedef struct nft_task_pool {
 #define nft_task_pool_class nft_task_class ":nft_task_pool"
 
 // This macro expands to declare the nft_task_pool_cast, _handle, _lookup, and _discard methods.
-NFT_DECLARE_WRAPPERS(nft_task_pool,static)
+NFT_DECLARE_WRAPPERS(nft_task_pool,)
 
 // This macro expands to definitions of the _cast, _handle, _lookup, and _discard methods.
-NFT_DEFINE_WRAPPERS(nft_task_pool,static)
+NFT_DEFINE_WRAPPERS(nft_task_pool,)
 
 // Our class will submit scheduled tasks to this global thread pool for execution.
 // We provide a pthread_once function to initialize it.

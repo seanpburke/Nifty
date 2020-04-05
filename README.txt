@@ -479,8 +479,8 @@ typedef struct nft_string
 
 #define nft_string_class nft_core_class ":nft_string"
 
-NFT_DECLARE_WRAPPERS(subclass)
-NFT_DEFINE_WRAPPERS(subclass)
+NFT_DECLARE_WRAPPERS(nft_string)
+NFT_DEFINE_WRAPPERS(nft_string))
 
 void
 nft_string_destroy(nft_core * core)

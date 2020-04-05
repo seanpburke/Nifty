@@ -8,9 +8,9 @@ CPPFLAGS	= -I../include
 # Select debug or optimized build.
 #
 ifdef NDEBUG
-CFLAGS		= -std=gnu99 -Wall -Wno-unused -DNDEBUG -O3
+CFLAGS		= -std=gnu11 -Wall -Wno-unused -DNDEBUG -O3
 else
-CFLAGS		= -std=gnu99 -Wall -Wno-unused-function  -g
+CFLAGS		= -std=gnu11 -Wall -g
 endif
 
 ifdef NFT_LOCKLESS
