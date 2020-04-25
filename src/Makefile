@@ -22,8 +22,6 @@ endif
 #
 CPPFLAGS	+= -DUSE_GETTIMEOFDAY
 
-# CPPFLAGS	+= -D_ALL_SOURCE	# Uncomment for Windows SFU builds.
-
 # Choose appropriate link libraries.
 #
 LDLIBS		= -lpthread			# Solaris, Linux, AIX

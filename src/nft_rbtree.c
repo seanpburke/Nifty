@@ -86,21 +86,22 @@ NFT_DEFINE_WRAPPERS(nft_rbtree,)
 #define KEY(n)		nodes[n].key
 #define DATA(n)		nodes[n].data
 
-
-/* Returns the first node in tree, or NULL if empty.
+/* Returns the index of the first node in tree, or NIL if empty.
  */
 static unsigned
 node_first( nft_rbtree * tree)
 {
+    unsigned     node  = NIL;
     nft_rbnode * nodes = tree->nodes;
+    if (nodes) {
+        node = ROOT;
+        if (IS_NIL(node))
+            return NIL;
 
-    unsigned node = ROOT;
-    if (IS_NIL(node))
-	return NIL;
-
-    // Go to the leftmost node in the tree.
-    while (!IS_NIL(LEFT(node)))	node = LEFT(node);
-
+        // Go to the leftmost node in the tree.
+        while (!IS_NIL(LEFT(node)))
+            node = LEFT(node);
+    }
     return node;
 }
 
@@ -432,6 +433,9 @@ delete_node(nft_rbtree * tree, unsigned z)
 static int
 resize_nodes(nft_rbtree *tree, int new_size)
 {
+    // new_size must be at least two, because node zero is a sentinel.
+    if (new_size < 2)
+        new_size = 2;
     assert(new_size > tree->next_free);
 
     // Attempt to realloc the nodes array to the new size.
@@ -441,6 +445,10 @@ resize_nodes(nft_rbtree *tree, int new_size)
 
     // If new_size is zero, realloc behaves like free.
     if (new_size  == 0) new_nodes = NULL;
+
+    // If the tree was empty, initialize the sentinel node.
+    if (tree->nodes == NULL)
+        new_nodes[0] = (nft_rbnode) { 0 };
 
     tree->nodes     = new_nodes;
     tree->num_nodes = new_size;
@@ -576,30 +584,24 @@ rbtree_create (const char * class, size_t size, int min_nodes, RBTREE_COMPARE co
     nft_rbtree  * tree = nft_rbtree_cast(nft_core_create(class, size));
     if (!tree) return NULL;
 
+    // Initialize the tree
+    tree->core.destroy = rbtree_destroy;
+    tree->compare   = compare;
+    tree->min_nodes = min_nodes;
+    tree->num_nodes = 0;
+    tree->nodes     = NULL;
+    tree->next_free = 1; // remember that the zeroth node is our sentinel
+    tree->current   = 0;
+    tree->locking   = 0;
+    pthread_rwlock_init(&tree->rwlock, NULL);
+
     // Allocate initial storage for the nodes, if requested.
     if (min_nodes > 0) {
-	if (!(tree->nodes = malloc(min_nodes * sizeof(nft_rbnode)))) {
+	if (!resize_nodes(tree, min_nodes)) {
 	    nft_rbtree_discard(tree);
 	    return NULL;
 	}
     }
-    else
-	tree->nodes = NULL;
-
-    // Initialize the other tree data.
-    tree->core.destroy = rbtree_destroy;
-    tree->compare   = compare;
-    tree->min_nodes = min_nodes;
-    tree->num_nodes = min_nodes;
-    tree->next_free = 1; // remember that the zeroth node is our sentinel
-    tree->current   = 0;
-    tree->locking   = 0;
-
-    // Initialize the sentinel
-    tree->nodes[0]  = (nft_rbnode) { 0 };
-
-    pthread_rwlock_init(&tree->rwlock, NULL);
-
     return tree;
 }
 
@@ -638,20 +640,12 @@ rbtree_insert(nft_rbtree *tree,  void * key,  void * data)
     if (tree->locking) rbtree_wrlock(tree);
 
     assert(tree->next_free > 0);
-    assert(tree->next_free <= tree->num_nodes);
+    assert(tree->next_free <= tree->num_nodes || tree->num_nodes == 0);
 
     // Ensure that there is room to insert a key.
-    if (tree->next_free == tree->num_nodes)
-    {
-	// The tree is full, so double its size.
-	int new_size = 2 * tree->num_nodes;
+    if (tree->next_free >= tree->num_nodes)
+        resize_nodes(tree, 2 * tree->num_nodes);
 
-	// If the tree was initially empty, allocate four nodes now.
-	if (new_size == 0)
-	    new_size =  4;
-
-	resize_nodes(tree, new_size);
-    }
     if (tree->next_free < tree->num_nodes) {
         // The first node in an empty tree is made the left child of NIL.
         if (tree->next_free == 1)
@@ -1271,7 +1265,7 @@ test_basic(void)
     char * test[20] = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
                         "k", "l", "m", "n", "o", "p", "q", "r", "s", "t" };
     void * key, * data;
-    nft_rbtree  * t = rbtree_new(10, rbtree_compare_strings);
+    nft_rbtree  * t = rbtree_new(0, rbtree_compare_strings);
 
     rbtree_locking(t, 1);    // Enable locking for thread-safety
 
@@ -1415,10 +1409,7 @@ test_private_api(void)
 
     printf("\nTesting the pointer-based API\n");
 
-    /* Create a new tree with 512 nodes allocated.
-     * Be sure to allocate prior to allocating strings,
-     * in order to force a pass thru the offset code in
-     * realloc-nodes.
+    /* Create a new tree with initial capacity of 512 nodes.
      */
     nft_rbtree * t = rbtree_new(512, rbtree_compare_strings);
 
