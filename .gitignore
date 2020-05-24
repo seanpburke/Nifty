@@ -7,9 +7,9 @@ src/nft_queue
 src/nft_rbtree
 src/nft_string
 src/nft_task
+src/nft_vector
 src/nft_win32
 
 # For XCode on MacOSX
 src/*.dSYM
 src/*.exe
-src/Nifty-*

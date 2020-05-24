@@ -83,17 +83,17 @@ typedef void    (* RBTREE_APPLYX) (             void * obj, void * arg);
 //______________________________________________________________________________
 //
 nft_rbtree_h nft_rbtree_new( int init_nodes, RBTREE_COMPARE comparator);
+/*
+ Creates a new tree. Memory is allocated for min_nodes. The tree will
+ be realloced if you exceed the initial allocation. The comparator is
+ a function that compares two pointer-sized arguments and returns an
+ integer that is less than, greater than, or equal to zero indicating
+ the relative order of the arguments. For example, the C-library function
+ strcmp() is a suitable comparator for arguments that are char *'s.
 
-/* Creates a new tree. Memory is allocated for min_nodes. The tree will
- * be realloced if you exceed the initial allocation. The comparator is
- * a function that compares two pointer-sized arguments and returns an
- * integer that is less than, greater than, or equal to zero indicating
- * the relative order of the arguments. For example, the C-library function
- * strcmp() is a suitable comparator for arguments that are char *'s.
- *
- * For duplex keys, the comparator takes four parameters: key1, key2,
- * data1, and data2.
- */
+ For duplex keys, the comparator takes four parameters: key1, key2,
+ data1, and data2.
+*/
 
 //______________________________________________________________________________
 //
@@ -101,8 +101,7 @@ int nft_rbtree_free ( nft_rbtree_h );
 /*
  Releases the tree's handle, and frees associated node storage.
  Returns zero on success, or EINVAL for handles that have already
- been release, and for handles that are not nft_rbtree objetcs.
-
+ been release, and for handles that are not nft_rbtree objects.
 */
 
 //______________________________________________________________________________
@@ -268,7 +267,7 @@ struct nft_rbtree
 
 nft_rbtree * rbtree_new         (int min_nodes, RBTREE_COMPARE compare);
 nft_rbtree * rbtree_vnew        (int min_nodes, RBTREE_COMPARE compare, void * key, ...);
-void         rbtree_free        (nft_rbtree * tree);
+int          rbtree_free        (nft_rbtree * tree);
 unsigned     rbtree_count       (nft_rbtree *);
 void         rbtree_locking     (nft_rbtree *, unsigned enabled);
 int          rbtree_validate    (nft_rbtree *);
