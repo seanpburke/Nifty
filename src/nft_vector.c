@@ -111,27 +111,33 @@ vector_new(int capacity, nft_comparator cmp)
  * vector_vnew		Create a new vector variadic
  *______________________________________________________________________________
  */
-nft_vector *
-vector_vnew (nft_comparator cmp, ...)
+static nft_vector *
+_vector_vanew (nft_comparator cmp, va_list args)
 {
     // First, count parameters to determine capacity.
     va_list ap;
-    va_start( ap, cmp);
+    va_copy(ap, args);
     int cap = 0;
-    for (void * val = va_arg(ap, void*); val; val = va_arg(ap, void*))
-        cap++;
+    for (void * vp = va_arg(ap, void*); vp; vp = va_arg(ap, void*)) cap++;
     va_end(ap);
 
     // Now create, populate and sort the vector.
-    nft_vector * vec = vector_new(cap, cmp);
-    if (vec) {
-        va_start( ap, cmp);
-        for (void * val = va_arg(ap, void*); val; val = va_arg(ap, void*))
-            vector_append(vec, val);
-        va_end(ap);
-        vector_sort(vec);
+    nft_vector * vector = vector_new(cap, cmp);
+    if (vector) {
+        for (void * vp = va_arg(args, void*); vp; vp = va_arg(args, void*))
+            vector_append(vector, vp);
+        vector_sort(vector);
     }
-    return vec;
+    return vector;
+}
+nft_vector *
+vector_vnew (nft_comparator cmp, ...)
+{
+    va_list  ap;
+    va_start(ap, cmp);
+    nft_vector * vector = _vector_vanew(cmp, ap);
+    va_end(ap);
+    return vector;
 }
 /*______________________________________________________________________________
  *
@@ -230,7 +236,7 @@ vector_unique(nft_vector * v)
  *
  * vector_find() - Find an item in a sorted slice of a vector.
  *
- * Returns a slice that starts at the position where the item would be,
+ * Returns a slice that starts at the position where the item _would_ be,
  * if the item were present. The slice is empty if the item is not present.
  *______________________________________________________________________________
  */
@@ -663,9 +669,16 @@ nft_vector_h
 nft_vector_new(int capacity, nft_comparator cmp)
 {
     nft_vector * vector = vector_new(capacity, cmp);
-    if (vector)
-        return nft_vector_handle(vector);
-    return NULL;
+    return nft_vector_handle(vector);
+}
+nft_vector_h
+nft_vector_vnew (nft_comparator cmp, ...)
+{
+    va_list  ap;
+    va_start(ap, cmp);
+    nft_vector * vector = _vector_vanew(cmp, ap);
+    va_end(ap);
+    return nft_vector_handle(vector);
 }
 int
 nft_vector_free(nft_vector_h h)
@@ -722,6 +735,17 @@ nft_vector_index(nft_vector_h h, const void * item)
     }
     return result;
 }
+int
+nft_vector_len(nft_vector_h h)
+{
+    int result = -1;
+    nft_vector * vector = nft_vector_lookup(h);
+    if (vector) {
+        result = vector->len;
+        nft_vector_discard(vector);
+    }
+    return result;
+}
 void *
 nft_vector_nth(nft_vector_h h, int index)
 {
@@ -740,6 +764,18 @@ nft_vector_search(nft_vector_h h, const void * item)
     nft_vector * vector = nft_vector_lookup(h);
     if (vector) {
         result = vector_search_slice(vector, item, (nft_slice){0, vector->len});
+        nft_vector_discard(vector);
+    }
+    return result;
+}
+nft_vector_h
+nft_vector_slice(nft_vector_h h, nft_slice s)
+{
+    nft_vector_h result = NULL;
+    nft_vector * vector = nft_vector_lookup(h);
+    if (vector) {
+        nft_vector * copy = vector_slice(vector, s);
+        result = nft_vector_handle(copy);
         nft_vector_discard(vector);
     }
     return result;
@@ -766,6 +802,74 @@ nft_vector_delete(nft_vector_h h, void * item)
     }
     return result;
 }
+nft_vector_h
+nft_vector_union(nft_vector_h a, nft_vector_h b)
+{
+    nft_vector_h result = NULL;
+    nft_vector * va = nft_vector_lookup(a);
+    if (va) {
+        nft_vector * vb = nft_vector_lookup(b);
+        if (vb) {
+            result = nft_vector_handle(vector_union(va, vb));
+            nft_vector_discard(vb);
+        }
+        nft_vector_discard(va);
+    }
+    return result;
+}
+nft_vector_h
+nft_vector_intersection(nft_vector_h a, nft_vector_h b)
+{
+    nft_vector_h result = NULL;
+    nft_vector * va = nft_vector_lookup(a);
+    if (va) {
+        nft_vector * vb = nft_vector_lookup(b);
+        if (vb) {
+            result = nft_vector_handle(vector_intersection(va, vb));
+            nft_vector_discard(vb);
+        }
+        nft_vector_discard(va);
+    }
+    return result;
+}
+nft_vector_h
+nft_vector_difference(nft_vector_h a, nft_vector_h b)
+{
+    nft_vector_h result = NULL;
+    nft_vector * va = nft_vector_lookup(a);
+    if (va) {
+        nft_vector * vb = nft_vector_lookup(b);
+        if (vb) {
+            result = nft_vector_handle(vector_difference(va, vb));
+            nft_vector_discard(vb);
+        }
+        nft_vector_discard(va);
+    }
+    return result;
+}
+int
+nft_vector_equal(nft_vector_h a, nft_vector_h b)
+{
+    int result = 0;
+    nft_vector * va = nft_vector_lookup(a);
+    if (va) {
+        nft_vector * vb = nft_vector_lookup(b);
+        if (vb) {
+            result = vector_equal(va, vb);
+            nft_vector_discard(vb);
+        }
+        nft_vector_discard(va);
+    }
+    return result;
+}
+/*
+ * TODO: I have yet to write handle-based wrappers for these functional apis:
+ * vector_apply
+ * vector_plex
+ * vector_filter
+ * vector_filter_2
+ * vector_reduce
+*/
 
 /******************************************************************************/
 /******************************************************************************/
@@ -794,6 +898,93 @@ const unsigned ITEST_LEN = (sizeof(itest) / sizeof(itest[0]));
 
 // This function is used with vector_reduce to sum the items.
 static long sum( long a, long b) { return (a + b); }
+
+// Test the public API
+static void test_public(void)
+{
+    nft_vector_h v = nft_vector_new(4, vector_integer_comparator);
+
+    // Test vector_append().
+    for (int i = 0; i < ITEST_LEN ; i++)
+	nft_vector_append(v, (void*) itest[i]);
+    for (int i = 0; i < ITEST_LEN ; i++)
+	assert(nft_vector_nth(v, i) == (void*) itest[i]);
+
+    // Test vector_sort().
+    nft_vector_sort(v);
+    for (int i = 0; i < ITEST_LEN - 1; i++)
+	assert(nft_vector_nth(v, i) <= nft_vector_nth(v, i+1));
+
+    // Test vector_search().
+    for (int i = 0; i < ITEST_LEN ; i++)
+	assert(nft_slice_len(nft_vector_search(v, (void*) itest[i])) > 0);
+    
+    nft_vector_h w = nft_vector_new(4, vector_integer_comparator);
+
+    // Test vector_insert().
+    for (int i = 0; i < ITEST_LEN ; i++)
+	nft_vector_insert(w, (void*) itest[i]);
+    for (int i = 0; i < ITEST_LEN - 1; i++)
+	assert(nft_vector_nth(w, i) == nft_vector_nth(v, i));
+
+    // Test vector_unique().
+    nft_vector_unique(w);
+
+    // Test vector_index().
+    assert( nft_vector_index(w, (void*)  0) ==  0);
+    assert( nft_vector_index(w, (void*)  1) ==  1);
+    assert( nft_vector_index(w, (void*)  2) ==  2);
+    assert( nft_vector_index(w, (void*)  3) ==  3); // after vector_unique()
+    assert( nft_vector_index(w, (void*) -1) == -1);
+
+    // Test vector_delete().
+    assert(nft_vector_delete(w, (void*) itest[2]) == OK);
+    assert(nft_vector_index( w, (void*) itest[2]) == -1);
+    assert(nft_vector_insert(w, (void*) itest[2]) == OK);
+    assert(nft_vector_index( w, (void*) itest[2]) >=  0);
+
+    // Test vector free().
+    assert(nft_vector_free(v) == OK);
+    assert(nft_vector_free(w) == OK);
+
+    // Test the set operations.
+    v = nft_vector_vnew(vector_string_comparator, "a", "b", "c", NULL);
+    w = nft_vector_vnew(vector_string_comparator, "c", "d", "e", NULL);
+    {   // test union
+        // x is our expected result. y and z are duplicates of v and w.
+        nft_vector_h x = nft_vector_vnew(vector_string_comparator, "a", "b", "c", "d", "e", NULL);
+        nft_vector_h y = nft_vector_slice(v, (nft_slice){ 0, nft_vector_len(v)});
+        nft_vector_h z = nft_vector_slice(w, (nft_slice){ 0, nft_vector_len(w)});
+        nft_vector_h r = nft_vector_union(y, z);
+        assert(nft_vector_equal(r, x));
+        // Remember that y and z will be freed by nft_vector_union,
+        // so we only need to free x and r (tho r may actually be y or z).
+        assert(nft_vector_free(x) == OK);
+        assert(nft_vector_free(r) == OK);
+    }
+    {   // test intersection
+        nft_vector_h x = nft_vector_vnew(vector_string_comparator, "c", NULL);
+        nft_vector_h y = nft_vector_slice(v, (nft_slice){ 0, nft_vector_len(v)});
+        nft_vector_h z = nft_vector_slice(w, (nft_slice){ 0, nft_vector_len(w)});
+        nft_vector_h r = nft_vector_intersection(y, z);
+        assert(nft_vector_equal(r, x));
+        assert(nft_vector_free(x) == OK);
+        assert(nft_vector_free(r) == OK);
+    }
+    {   // test difference
+        nft_vector_h x = nft_vector_vnew(vector_string_comparator, "a", "b", NULL);
+        nft_vector_h y = nft_vector_slice(v, (nft_slice){ 0, nft_vector_len(v)});
+        nft_vector_h z = nft_vector_slice(w, (nft_slice){ 0, nft_vector_len(w)});
+        nft_vector_h r = nft_vector_difference(y, z);
+        assert(nft_vector_equal(r, x));
+        assert(nft_vector_free(x) == OK);
+        assert(nft_vector_free(r) == OK);
+    }
+    assert(nft_vector_free(v) == OK);
+    assert(nft_vector_free(w) == OK);
+
+    fprintf(stderr, "nft_vector: test_public passes.\n");
+}
 
 // Test the private API
 static void test_private(void)
@@ -911,53 +1102,6 @@ static void test_private(void)
     fprintf(stderr, "nft_vector: test_private passes.\n");
 }
 
-// Test the public API
-static void test_public(void)
-{
-    nft_vector_h v = nft_vector_new(4, vector_integer_comparator);
-
-    // Test vector_append().
-    for (int i = 0; i < ITEST_LEN ; i++)
-	nft_vector_append(v, (void*) itest[i]);
-    for (int i = 0; i < ITEST_LEN ; i++)
-	assert(nft_vector_nth(v, i) == (void*) itest[i]);
-
-    // Test vector_sort().
-    nft_vector_sort(v);
-    for (int i = 0; i < ITEST_LEN - 1; i++)
-	assert(nft_vector_nth(v, i) <= nft_vector_nth(v, i+1));
-
-    // Test vector_search().
-    for (int i = 0; i < ITEST_LEN ; i++)
-	assert(nft_slice_len(nft_vector_search(v, (void*) itest[i])) > 0);
-    
-    nft_vector_h w = nft_vector_new(4, vector_integer_comparator);
-
-    // Test vector_insert().
-    for (int i = 0; i < ITEST_LEN ; i++)
-	nft_vector_insert(w, (void*) itest[i]);
-    for (int i = 0; i < ITEST_LEN - 1; i++)
-	assert(nft_vector_nth(w, i) == nft_vector_nth(v, i));
-
-    // Test vector_unique().
-    nft_vector_unique(w);
-
-    // Test vector_index().
-    assert( nft_vector_index(w, (void*)  0) ==  0);
-    assert( nft_vector_index(w, (void*)  1) ==  1);
-    assert( nft_vector_index(w, (void*)  2) ==  2);
-    assert( nft_vector_index(w, (void*)  3) ==  3); // after vector_unique()
-    assert( nft_vector_index(w, (void*) -1) == -1);
-
-    // Test vector_delete().
-    assert(nft_vector_delete(w, (void*) itest[2]) == OK);
-    assert(nft_vector_index( w, (void*) itest[2]) == -1);
-    assert(nft_vector_insert(w, (void*) itest[2]) == OK);
-    assert(nft_vector_index( w, (void*) itest[2]) >=  0);
-
-    fprintf(stderr, "nft_vector: test_public passes.\n");
-}
-
 // Test performance using the private API
 static void test_performance(char ** keys, int nkeys)
 {
@@ -1048,6 +1192,15 @@ static void test_performance(char ** keys, int nkeys)
     fprintf(stderr, "nft_vector: test_performance passes.\n");
 }
 
+// Returns the number of unfreed handles.
+int count_handles() {
+    int result = 0;
+    nft_handle * handles = nft_core_gather(nft_core_class);
+    for (result = 0; handles[result] ; result++);
+    free(handles);
+    return result;
+}
+
 /* This test inserts one string per line of the standard input into keys.
  * You can give a limit on the command line, eg:
  *
@@ -1058,9 +1211,9 @@ char * keys[MAX_KEYS];
 
 int main(int argc, char * argv[])
 {
-    // Test the private API and the public, handle-based API.
-    test_private();
+    // Test the public and private APIs.
     test_public();
+    test_private();
 
     // Load keys from stdin.
     int    limit = ((argc == 2) ? ((atoi(argv[1]) <= MAX_KEYS) ? atoi(argv[1]) : MAX_KEYS) : MAX_KEYS);
@@ -1077,6 +1230,9 @@ int main(int argc, char * argv[])
 
     // Run the performance tests.
     test_performance(keys, i);
+
+    // Test for leaked handles.
+    assert(0 == count_handles());
 
     fprintf(stderr, "nft_vector: All tests passed.\n");
     exit(0);
