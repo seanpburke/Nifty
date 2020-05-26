@@ -566,14 +566,14 @@ nft_vector *
 vector_filter(nft_vector *v, nft_vector_filter filter, const void * arg)
 {
     void ** vec = v->vec;
-    int i = 0;
-
-    for (int j = 0; j < v->len; j++)
-	if (filter(vec[j], arg))
-	    vec[i++] = vec[j];
-    v->len = i;
-    vec[i] = NULL;
-
+    if (vec) {
+        int i = 0;
+        for (int j = 0; j < v->len; j++)
+            if (filter(vec[j], arg))
+                vec[i++] = vec[j];
+        v->len = i;
+        vec[i] = NULL;
+    }
     return v;
 }
 /*______________________________________________________________________________
@@ -585,14 +585,14 @@ nft_vector *
 vector_filter_2(nft_vector *v, nft_vector_filter_2 filter, const void * arg1, const void * arg2)
 {
     void ** vec = v->vec;
-    int i = 0;
-
-    for (int j = 0; j < v->len; j++)
-	if (filter(vec[j], arg1, arg2))
-	    vec[i++] = vec[j];
-    v->len = i;
-    vec[i] = NULL;
-
+    if (vec) {
+        int i = 0;
+        for (int j = 0; j < v->len; j++)
+            if (filter(vec[j], arg1, arg2))
+                vec[i++] = vec[j];
+        v->len = i;
+        vec[i] = NULL;
+    }
     return v;
 }
 /*______________________________________________________________________________
