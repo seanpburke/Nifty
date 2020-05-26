@@ -506,7 +506,7 @@ rbtree_vnew (int num, RBTREE_COMPARE compare, void * key, ...)
 int
 rbtree_free(nft_rbtree * tree)
 {
-    return nft_rbtree_discard(tree);
+    return tree ? nft_rbtree_discard(tree) : EINVAL ;
 }
 
 /*-----------------------------------------------------------------------------

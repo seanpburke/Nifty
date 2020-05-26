@@ -147,7 +147,7 @@ vector_vnew (nft_comparator cmp, ...)
 int
 vector_free(nft_vector * vec)
 {
-    return nft_vector_discard(vec);
+    return vec ? nft_vector_discard(vec) : EINVAL;
 }
 /*______________________________________________________________________________
  *
@@ -1206,11 +1206,11 @@ int count_handles() {
  *
  *   ./nft_vector 10 < /usr/share/dict/words
  */
-const int MAX_KEYS = 200000;
-char * keys[MAX_KEYS];
-
 int main(int argc, char * argv[])
 {
+    const int MAX_KEYS = 100000;
+    char * keys[MAX_KEYS];
+
     // Test the public and private APIs.
     test_public();
     test_private();
