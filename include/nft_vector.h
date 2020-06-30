@@ -91,7 +91,7 @@ nft_vector_h nft_vector_new(int capacity, nft_comparator comparator);
   Create a vector, given the initial capacity and comparison function.
   The vector will be resized by doubling as necessary.
   strcmp() would be suitable for null-terminated strings, except that
-  it returns and int, when comparators should return a long integer.
+  it returns an int, when comparators should return a long integer.
   See "handy comparators" below for string and integer comparators.
 */
 
@@ -163,10 +163,10 @@ nft_vector_h nft_vector_unique(nft_vector_h handle);
   Returns the input handle.
 */
 
-nft_vector_h nft_vector_union(nft_vector_h a, nft_vector_h b);
+nft_vector_h nft_vector_union       (nft_vector_h a, nft_vector_h b);
 nft_vector_h nft_vector_intersection(nft_vector_h a, nft_vector_h b);
-nft_vector_h nft_vector_difference(nft_vector_h a, nft_vector_h b);
-int          nft_vector_equal(nft_vector_h a, nft_vector_h b);
+nft_vector_h nft_vector_difference  (nft_vector_h a, nft_vector_h b);
+int          nft_vector_equal       (nft_vector_h a, nft_vector_h b);
 /*
   Perform set operations on _sorted_, _uniqued_ vectors.
   Except for equality, these operations free their inputs.

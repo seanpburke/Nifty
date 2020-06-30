@@ -19,9 +19,15 @@
  *
  * DESCRIPTION
  *
- * A package for managing "vectors", which in this case are arrays of
- # distinct ordered items, such that we can do set operations efficiently.
- * The complete description is in the header file nft_vector.h.
+ * A package for managing ordered dynamic arrays, so that we can do
+ * set operations efficiently. Some of the operations supported are:
+ *
+ *   - sort, unique
+ *   - search
+ *   - set union, intersection, difference
+ *   - filter, map, reduce
+ *
+ * The API is documented in the header file nft_vector.h.
  *******************************************************************
  */
 #include <assert.h>

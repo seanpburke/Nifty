@@ -6,7 +6,7 @@ been very useful in my projects. The packages are:
     nft_queue	- A message queue for producer-consumer systems.
     nft_rbtree  - A balanced btree for associative mapping.
     nft_task	- Schedule tasks to execute at a specified time.
-    nft_vector	- An array package for operations on sets.
+    nft_vector	- Sorted arrays for fast operations on sets.
     nft_core    - The base class for most of the Nifty packages.
     nft_win32	- A limited pthread emulation layer for Windows.
 
