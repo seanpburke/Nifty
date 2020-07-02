@@ -474,33 +474,35 @@ nft_task_this(void)
 #define inline __inline
 #endif
 
-/* task_comp
+/* comp_tasks
  *
  * Determine earlier of two tasks, used to order the Queue.
  */
 static inline int
-task_comp(nft_task * t1, nft_task * t2)
+comp_tasks(heap_t * heap, int x, int y)
 {
-    int sec_diff;
+    nft_task * t1 = heap->tasks[x];
+    nft_task * t2 = heap->tasks[y];
 
     /* Note that we invert the order of comparison, so that
      * smaller (earlier) times are at the top of the queue.
      */
+    int  sec_diff;
     if ((sec_diff = (t2->abstime.tv_sec - t1->abstime.tv_sec)) != 0)
 	return sec_diff;
     else
 	return (t2->abstime.tv_nsec - t1->abstime.tv_nsec);
 }
 
-#define COMPARE_NODES(x, y) task_comp(heap->tasks[x], heap->tasks[y])
-
-#define SWAP_NODES(x, y)			\
-    {   void * temp    = heap->tasks[x];	\
-	heap->tasks[x] = heap->tasks[y];	\
-	heap->tasks[y] = temp;			\
-        heap->tasks[x]->index = x;		\
-        heap->tasks[y]->index = y;		\
-    }
+static inline void
+swap_tasks(heap_t * heap, int x, int y)
+{
+    void * temp    = heap->tasks[x];
+    heap->tasks[x] = heap->tasks[y];
+    heap->tasks[y] = temp;
+    heap->tasks[x]->index = x;
+    heap->tasks[y]->index = y;
+}
 
 /* upheap()
  *
@@ -521,8 +523,8 @@ upheap(heap_t *heap, long child)
 	/* If the parent is less than the child,
 	 * exchange parent and child nodes in the heap.
 	 */
-	if (COMPARE_NODES(parent, child) < 0)
-	    SWAP_NODES(parent, child)
+	if (comp_tasks(heap, parent, child) < 0)
+	    swap_tasks(heap, parent, child);
 	else
 	    break;
 
@@ -551,14 +553,14 @@ downheap(heap_t *heap, long i)
 	 */
 	largest = child1;
 	if ((child2 < heap->count) &&
-	    (COMPARE_NODES(child1, child2) < 0))
+	    (comp_tasks(heap, child1, child2) < 0))
 	    largest = child2;
 
 	/* If i is less than its largest child, then exchange contents
 	 * of i and largest, and repeat the process at largest.
 	 */
-	if (COMPARE_NODES(i, largest) < 0)
-	    SWAP_NODES(i, largest)
+	if (comp_tasks(heap, i, largest) < 0)
+	    swap_tasks(heap, i, largest);
 	else
 	    break;
 	i = largest;
@@ -699,7 +701,7 @@ heap_delete(heap_t *heap, long index)
     // Removing the last node requires no further work.
     if (index < --heap->count)
     {
-	int comp = COMPARE_NODES(index, heap->count);
+	int comp = comp_tasks(heap, index, heap->count);
 
 	// Replace the task at index with the last task
 	heap->tasks[index] = heap->tasks[heap->count];
