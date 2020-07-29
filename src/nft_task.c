@@ -1,5 +1,5 @@
 /******************************************************************************
- * (C) Copyright Xenadyne Inc, 2002 - 2015 ALL RIGHTS RESERVED.
+ * (C) Copyright Xenadyne Inc, 2002 - 2020 ALL RIGHTS RESERVED.
  *
  * Permission to use, copy, modify and distribute this software for
  * any purpose and without fee is hereby granted, provided that the
@@ -138,10 +138,9 @@ task_thread(void * ignore)
 	 */
 	while (heap_top(&Queue, &task))
 	{
-	    if ((task->abstime.tv_sec >   curr.tv_sec) ||
-		((task->abstime.tv_sec == curr.tv_sec) &&
-		 (task->abstime.tv_nsec > curr.tv_nsec)))
-		break; // Task not yet due to execute.
+            // Break if the top task is not yet due to execute.
+	    if (nft_timespec_comp(task->abstime, curr) > 0)
+		break;
 
 	    // Pop the top task from the queue.
 	    rc = heap_pop(&Queue, &task); assert(rc == 1);
@@ -153,16 +152,9 @@ task_thread(void * ignore)
 	    int discard = 1;
 	    if (task->interval.tv_sec || task->interval.tv_nsec)
 	    {
-		// Periodic task. Increment abstime (rather than current time)
-		// by the task interval, to prevent cumulative drift.
-		task->abstime.tv_sec  += task->interval.tv_sec;
-		task->abstime.tv_nsec += task->interval.tv_nsec;
-
-		// Normalize abstime.
-		task->abstime.tv_sec += task->abstime.tv_nsec / NANOSEC;
-		task->abstime.tv_nsec = task->abstime.tv_nsec % NANOSEC;
-
-		// Re-insert task into queue, and remember not to discard it.
+		// Periodic task. Increment abstime by the task interval,
+		// and re-insert task into queue, remembering not to discard it.
+		task->abstime = nft_timespec_add(task->abstime, task->interval);
 		heap_insert(&Queue, task);
 		discard = 0;
 	    }
@@ -282,13 +274,10 @@ nft_task_create(const char    * class,
     }
     else {
 	// If abstime isn't given, compute it as now plus one interval.
-	task->abstime = nft_gettime();
-	task->abstime.tv_sec  += interval.tv_sec;
-	task->abstime.tv_nsec += interval.tv_nsec;
+	task->abstime = nft_timespec_add(nft_gettime(), interval);
     }
     // Normalize the absolute time.
-    task->abstime.tv_sec += task->abstime.tv_nsec / NANOSEC;
-    task->abstime.tv_nsec = task->abstime.tv_nsec % NANOSEC;
+    task->abstime = nft_timespec_norm(task->abstime);
 
     return task;
 }
@@ -478,7 +467,7 @@ nft_task_this(void)
  *
  * Determine earlier of two tasks, used to order the Queue.
  */
-static inline int
+static inline int64_t
 comp_tasks(heap_t * heap, int x, int y)
 {
     nft_task * t1 = heap->tasks[x];
@@ -487,11 +476,7 @@ comp_tasks(heap_t * heap, int x, int y)
     /* Note that we invert the order of comparison, so that
      * smaller (earlier) times are at the top of the queue.
      */
-    int  sec_diff;
-    if ((sec_diff = (t2->abstime.tv_sec - t1->abstime.tv_sec)) != 0)
-	return sec_diff;
-    else
-	return (t2->abstime.tv_nsec - t1->abstime.tv_nsec);
+    return nft_timespec_comp(t2->abstime, t1->abstime);
 }
 
 static inline void
@@ -1144,8 +1129,34 @@ void test_nft_task_pool()
 struct timespec mark, done;
 #define MARK	mark = nft_gettime()
 #define TIME	done = nft_gettime()
-#define ELAPSED ((done.tv_sec * 1.0 + done.tv_nsec * 0.000000001) - \
-                 (mark.tv_sec * 1.0 + mark.tv_nsec * 0.000000001)   )
+#define ELAPSED 0.000000001 * nft_timespec_comp(done, mark)
+
+void
+test_time()
+{
+    struct timespec zero = (struct timespec){ 0, 0 };
+    struct timespec half = (struct timespec){ 0, 500000000 };
+    struct timespec one  = (struct timespec){ 1, 0 };
+    struct timespec test = (struct timespec){ 0, 2000000000 };
+
+    printf("Testing nft_timespec_add, _comp and _norm...");
+    
+    test = nft_timespec_norm(test);
+    assert(2 == test.tv_sec && 0 == test.tv_nsec);
+
+    test = nft_timespec_add(zero, zero);
+    assert(test.tv_sec == zero.tv_sec && test.tv_nsec == zero.tv_nsec);
+
+    test = nft_timespec_add(one, half);
+    assert(test.tv_sec == one.tv_sec && test.tv_nsec == half.tv_nsec);
+
+    assert(nft_timespec_comp(test, one) == half.tv_nsec);
+
+    test = nft_timespec_add(test, half);
+    assert(2 == test.tv_sec && 0 == test.tv_nsec);
+
+    printf(" Passed!\n");
+}
 
 void
 test_heap()
@@ -1206,6 +1217,9 @@ test_heap()
 int
 main(int argc, char *argv[])
 {
+    // Test the inline functions in nft_gettime.h.
+    test_time();
+
     // Test the heap-sort implementation.
     test_heap();
 

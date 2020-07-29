@@ -89,4 +89,29 @@ nft_gettime(void)
 #endif
 }
 
+// Compare two timespecs, returning the difference in nanosec.
+static inline int64_t
+nft_timespec_comp(struct timespec now, struct timespec then)
+{
+    return (now.tv_sec  - then.tv_sec ) * NANOSEC + (now.tv_nsec - then.tv_nsec);
+}
+
+// Returns the normalized timespec.
+static inline struct timespec
+nft_timespec_norm(struct timespec ts)
+{
+    ts.tv_sec += ts.tv_nsec / NANOSEC;
+    ts.tv_nsec = ts.tv_nsec % NANOSEC;
+    return ts;
+}
+
+// Return the timespec offset by an interval.
+static inline struct timespec
+nft_timespec_add(struct timespec ts, struct timespec interval)
+{
+    ts.tv_nsec += interval.tv_nsec;
+    ts.tv_sec  += interval.tv_sec;
+    return nft_timespec_norm(ts);
+}
+
 #endif // _NFT_GETTIME_H_

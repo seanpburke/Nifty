@@ -1395,9 +1395,7 @@ int	nkeys = 0;
 struct timespec mark, done;
 #define MARK	mark = nft_gettime()
 #define TIME	done = nft_gettime()
-#define ELAPSED ((done.tv_sec * 1.0 + done.tv_nsec * 0.000000001) - \
-                 (mark.tv_sec * 1.0 + mark.tv_nsec * 0.000000001)   )
-
+#define ELAPSED 0.000000001 * nft_timespec_comp(done, mark)
 
 static void
 test_private_api(void)

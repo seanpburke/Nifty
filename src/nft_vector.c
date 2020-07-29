@@ -890,8 +890,13 @@ nft_vector_equal(nft_vector_h a, nft_vector_h b)
 #endif
 #include <assert.h>
 #include <stdio.h>
-#include <sys/times.h>
-#include <sys/resource.h>
+
+/* Timing stuff.
+ */
+struct timespec mark, done;
+#define MARK	mark = nft_gettime()
+#define TIME	done = nft_gettime()
+#define ELAPSED 0.000000001 * nft_timespec_comp(done, mark)
 
 void print_vector(nft_vector * v) {
     for (int i = 0; i < v->len; i++)
@@ -1112,16 +1117,6 @@ static void test_private(void)
 static void test_performance(char ** keys, int nkeys)
 {
     int i;
-#ifndef CLK_TCK
-#define CLK_TCK 100
-#endif
-    float	usert = 0.0, syst = 0.0;
-    float       tick  = 1.0 / CLK_TCK;
-    struct tms 	start, done;
-#define MARK	times(&start)
-#define TIME	times(&done); \
-    usert = (done.tms_utime - start.tms_utime) * tick; \
-    syst  = (done.tms_stime - start.tms_stime) * tick
 
     /* Load vector a from the first half of keys, using vector_insert.
      * vector_insert maintains sorted order, so it is very slow on long vectors.
@@ -1136,7 +1131,7 @@ static void test_performance(char ** keys, int nkeys)
 	vector_insert(a, keys[i]);
     }
     TIME; /* compute time usage */
-    fprintf(stderr, "Time to insert %d strings: %5.2fu %5.2fs\n", i, usert, syst);
+    fprintf(stderr, "Time to insert  %d strings: %.3f\n", i, ELAPSED);
 
     /* Load up vector b with the second half of keys, using vector_append.
      * You must call vector_sort() to restore sorted order.
@@ -1146,11 +1141,11 @@ static void test_performance(char ** keys, int nkeys)
     for (i = 0; i < nkeys/2; i++)
 	vector_append(b, keys[nkeys/2 + i]);
     TIME;
-    fprintf(stderr, "Time to append %d strings: %5.2fu %5.2fs\n", i, usert, syst);
+    fprintf(stderr, "Time to append  %d strings: %.3f\n", i, ELAPSED);
     MARK;
     vector_sort(b);
     TIME;
-    fprintf(stderr, "Time to sort   %d strings: %5.2fu %5.2fs\n", i, usert, syst);
+    fprintf(stderr, "Time to sort    %d strings: %.3f\n", i, ELAPSED);
 
     /* Create a union of both vectors, preserving the original input vectors.
      * The union should contain every item in keys[].
@@ -1161,7 +1156,7 @@ static void test_performance(char ** keys, int nkeys)
     for (i = 0; i < nkeys; i++)
 	assert(vector_index(c, keys[i]) >= 0);
     TIME;
-    fprintf(stderr, "Time to search %d strings: %5.2fu %5.2fs\n", i, usert, syst);
+    fprintf(stderr, "Time to search %d strings: %.3f\n", i, ELAPSED);
 
     /* The difference c - a should equal b.
      */
