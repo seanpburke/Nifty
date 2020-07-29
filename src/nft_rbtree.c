@@ -1259,7 +1259,7 @@ test_basic(void)
     assert(!strcmp(value,"three"));
     rbtree_free(u);
 
-    printf("\nTesting basic operations\n");
+    printf("Testing basic operations: ");
 
     int    testn    = 20;
     char * test[20] = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
@@ -1341,6 +1341,8 @@ test_basic(void)
     }
     int result = nft_rbtree_discard(t);
     assert(0 == result);
+
+    printf("Passed!\n");
 }
 
 static long
@@ -1355,12 +1357,11 @@ strcmp_duplex(char *key1, char *key2, char *tok1, char *tok2)
 static void
 test_duplex_keys(void)
 {
+    printf("Testing with a duplex comparator: ");
+
+    nft_rbtree * u  = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 10, strcmp_duplex);
+
     char * test[10] = { "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten" };
-
-    printf("\nTesting with a duplex comparator\n");
-
-    nft_rbtree * u = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 10, strcmp_duplex);
-
     rbtree_insert(u, "bob", test[0]);
     rbtree_insert(u, "bob", test[1]);
     rbtree_insert(u, "bob", test[2]);
@@ -1379,6 +1380,8 @@ test_duplex_keys(void)
 
     int result = nft_rbtree_discard(u);
     assert(0 == result);
+
+    printf("Passed!\n");
 }
 
 

@@ -733,13 +733,13 @@ null_task(void * arg)
 void
 dot_task(void * arg)
 {
-    printf(".");
+    fprintf(stderr, ".");
 }
 
 void
 print_task(void * arg)
 {
-    fputs(arg, stderr);
+    fprintf(stderr, "%p ", arg);
 }
 
 void
@@ -747,7 +747,7 @@ cancel_task(void * arg)
 {
     void * result;
 
-    printf("Bang! ");
+    printf(" Bang!");
     result = nft_task_cancel(arg);
     assert(result != NULL);
     Waiting = 0;
@@ -785,36 +785,23 @@ test_basic() {
     // Schedule a series of tasks at one second intervals.
     {
 	struct timespec absolute = nft_gettime();
+	struct timespec delta	 = { 1, 0 };
 	struct timespec interval = { 0, 0 };
-	nft_task_h      task;
+	const  int count = 10;
+	nft_task_h task[count];
 
-	printf("Testing a series of nine tasks at one-second intervals:\n");
-	absolute.tv_sec += 1;
-	task = nft_task_schedule(absolute, interval, print_task, "one\n");
-	absolute.tv_sec += 1;
-	task = nft_task_schedule(absolute, interval, print_task, "two\n");
-	absolute.tv_sec += 1;
-	task = nft_task_schedule(absolute, interval, print_task, "three\n");
-	absolute.tv_sec += 1;
-	task = nft_task_schedule(absolute, interval, print_task, "four\n");
-	absolute.tv_sec += 1;
-	task = nft_task_schedule(absolute, interval, print_task, "five\n");
-	absolute.tv_sec += 1;
-	task = nft_task_schedule(absolute, interval, print_task, "six\n");
-	absolute.tv_sec += 1;
-	task = nft_task_schedule(absolute, interval, print_task, "seven\n");
-	absolute.tv_sec += 1;
-	task = nft_task_schedule(absolute, interval, print_task, "eight\n");
-	absolute.tv_sec += 1;
-	task = nft_task_schedule(absolute, interval, print_task, "nine\n");
-
-	// Wait until the scheduled tasks have executed.
-	sleep(10);
-
-	// The last task should not be cancelable.
-	assert(!nft_task_cancel(task));
-
-	fprintf(stderr, "Series test Passed!\n");
+	printf("Testing a series of %d tasks at one-second intervals:\n", count);
+	for (intptr_t i = 0; i < count; i++) {
+	    absolute = nft_timespec_add(absolute, delta);
+	    task[i]  = nft_task_schedule(absolute, interval, print_task, (void*)(i + 1));
+	}
+	sleep(1);
+	// Confirm that the scheduled tasks have executed.
+	for (int i = 0; i < count; i++) {
+	    sleep(1);
+	    assert(!nft_task_cancel(task[i]));
+	}
+	fprintf(stderr, "Passed!\n");
     }
 
     // Test a schedule/cancel/cancel sequence.
@@ -822,89 +809,86 @@ test_basic() {
 	printf("Testing schedule/cancel/cancel - ");
 
 	struct timespec absolute = nft_gettime();
+	struct timespec delta	 = { 1, 0 };
 	struct timespec interval = { 0, 0 };
 
 	// Add one second to the current time.
-	absolute.tv_sec += 1;
+	absolute = nft_timespec_add(absolute, delta);
 
-	void     * arg  = (void*) 123;
+	void	 * arg	= (void*) 123;
 	nft_task_h task = nft_task_schedule(absolute, interval, dot_task, arg);
-	if (!task) {
-	    printf("nft_task_schedule failed!\n");
-	    exit(1);
-	}
-	if (nft_task_cancel(task) != arg) {
-	    printf("nft_task_cancel failed!\n");
-	    exit(1);
-	}
-	if (nft_task_cancel(task) != NULL) {
-	    printf("second nft_task_cancel should have failed!\n");
-	    exit(1);
-	}
+	assert(NULL != task);
+	assert(arg  == nft_task_cancel(task)); // The first cancel should succeed.
+	assert(NULL == nft_task_cancel(task)); // The second cancel should fail.
 	printf(" Passed!\n");
     }
 
-    // Schedule a repeating task that prints a dot to the console once per second.
+    // Schedule a repeating task and cancel from the main thread.
     {
 	printf("Testing cancel of a repeating task:");
+	fflush(stdout);
 
-	struct timespec interval = { 1, 0 };
-	void     * arg  = (void*) 123;
+	struct timespec interval = { 0, 100000000 };
+	void	 * arg	= (void*) 123;
 	nft_task_h task = nft_task_schedule((struct timespec){0,0}, interval, dot_task, arg);
 	assert(task);
 
-	// Cancel from the main thread after two seconds.
-	for (int i = 0; i < 2; i++) {
-	    sleep(1);
-	    fflush(stdout);
-	}
-	printf("Bang! ");
+	// Cancel from the main thread after one second.
+	sleep(1);
+	printf(" Bang!");
 
 	// nft_task_cancel should return the arg parameter.
-	puts( (nft_task_cancel(task) == arg) ? " Passed!" : " Failed!");
+	assert(arg == nft_task_cancel(task));
+	printf(" Passed!\n");
     }
 
-    // Schedule a repeating task that prints a dot to the console once per second.
+    // Schedule a repeating task and cancel it from another task.
     {
 	printf("Testing scheduled cancel of a repeating task:");
+	fflush(stdout);
 
-	struct timespec interval = { 1, 0 };
-	void          * arg  = (void *) 123;
-	nft_task_h      task = nft_task_schedule((struct timespec){0,0}, interval, dot_task, arg);
+	struct timespec interval = { 0, 100000000 };
+	void	      * arg  = (void *) 123;
+	nft_task_h	task = nft_task_schedule((struct timespec){0,0}, interval, dot_task, arg);
 	assert(task);
 
-	// Schedule a task to cancel the dot_task in 3 seconds.
+	// Schedule a task to cancel the dot_task in one seconds.
 	struct timespec absolute = nft_gettime();
-	absolute.tv_sec += 3;
-	nft_task_schedule(absolute, (struct timespec){0,0}, cancel_task, task);
+	absolute.tv_sec += 1;
+	nft_task_h canceler = nft_task_schedule(absolute, (struct timespec){0,0}, cancel_task, task);
+	assert(canceler);
 
+	// Wait for cancel_task to execute.
 	Waiting = 1;
 	while (Waiting)	{
 	    sleep(1);
 	    fflush(stdout);
 	}
+	assert(NULL == nft_task_cancel(canceler));
+
 	// The dot task should be gone.
-	puts( (nft_task_cancel(task) == NULL) ? " Passed!" : " Failed!");
+	assert(NULL == nft_task_cancel(task));
+	printf(" Passed!\n");
     }
 
     // Schedule a repeating task that cancels itself.
     {
 	printf("Testing self-cancel of a repeating task:");
+	fflush(stdout);
 
 	struct timespec absolute = { 0, 0 };
 	struct timespec interval = { 1, 0 };
-	void          * arg      = (void *) 123;
-	nft_task_h      task     = nft_task_schedule(absolute, interval, cancel_self, arg);
+	void	      * arg	 = (void *) 123;
+	nft_task_h	task	 = nft_task_schedule(absolute, interval, cancel_self, arg);
 	assert(task);
 
 	Waiting = 1;
 	while (Waiting)	{
 	    sleep(1);
-	    fflush(stdout);
 	}
-
 	// The task should be gone.
-	puts( (nft_task_cancel(task) == NULL) ? " Passed!" : " Failed!");
+	assert(NULL == nft_task_cancel(task));
+	printf(" Passed!\n");
     }
 
     // Stress test - schedule many tasks to execute randomly over 10 seconds.
@@ -922,7 +906,7 @@ test_basic() {
 	for (i = 0; i < n; i++) {
 	    long  msec = random() % 10000;
 	    struct timespec ts = {
-		absolute.tv_sec  + (msec / 1000) + 1,
+		absolute.tv_sec	 + (msec / 1000) + 1,
 		absolute.tv_nsec + (msec % 1000) * 1000000
 	    };
 	    nft_task_h task = nft_task_schedule(ts, (struct timespec){0,0}, test_msec, (void*) msec);
@@ -962,7 +946,7 @@ test_basic() {
 	{
 	    int msec = random() % 1000;
 	    struct timespec ts = {
-		absolute.tv_sec  + (msec / 1000),
+		absolute.tv_sec	 + (msec / 1000),
 		absolute.tv_nsec + (msec % 1000) * 1000000
 	    };
 	    nft_task_h task = nft_task_schedule(ts, (struct timespec){0,0}, null_task, NULL);
@@ -1140,7 +1124,7 @@ test_time()
     struct timespec test = (struct timespec){ 0, 2000000000 };
 
     printf("Testing nft_timespec_add, _comp and _norm...");
-    
+
     test = nft_timespec_norm(test);
     assert(2 == test.tv_sec && 0 == test.tv_nsec);
 
