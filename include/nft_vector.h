@@ -105,8 +105,9 @@ int nft_vector_free ( nft_vector_h handle );
 int nft_vector_append(nft_vector_h handle, void * item);
 /*
   Appends the item to the end of the vector.
-  Returns zero on success, or EINVAL for handles that are invalid,
-  and for handles that are not nft_vector objects.
+  Returns zero on success, ENOMEM on memory exhaustion,
+  and EINVAL for handles that are invalid, or handles that
+  do not refer to nft_vector objects.
 */
 
 int nft_vector_delete(nft_vector_h handle, void * item);
@@ -125,7 +126,8 @@ int nft_vector_index(nft_vector_h handle, const void * item);
 int nft_vector_insert(nft_vector_h handle, void *item);
 /*
   Inserts the given item at the correct index in a _sorted_ vector.
-  Returns EINVAL on invalid or non-vector handles.
+  Returns zero on success, ENOMEM on memory exhaustion,
+  and EINVAL on invalid or non-vector handles.
 */
 
 int nft_vector_len(nft_vector_h h);
@@ -136,6 +138,20 @@ int nft_vector_len(nft_vector_h h);
 void * nft_vector_nth(nft_vector_h handle, int index);
 /*
   Returns the item at the given index, or NULL if index is out of bounds.
+*/
+
+int nft_vector_push(nft_vector_h handle, void * item);
+/*
+  An alias for vector_append, for symmetry with nft_vector_pop().
+  The _push and _pop functions let you use the vector like stack.
+*/
+
+int nft_vector_pop(nft_vector_h handle, void ** item);
+/*
+  Removes the last item in the vector and saves it in *item.
+  The _push and _pop functions let you use the vector like stack.
+  Returns zero on success, and EINVAL on invalid or non-vector handles.
+  If the vector is empty, *itemp is set to NULL and ENOENT is returned.
 */
 
 nft_slice nft_vector_search(nft_vector_h handle, const void * item);

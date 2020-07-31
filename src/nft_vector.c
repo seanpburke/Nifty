@@ -164,12 +164,39 @@ int
 vector_append(nft_vector * v, void * item)
 {
     if (v->len == v->cap) {
-	v->cap = 2*v->cap;
-        v->vec = realloc(v->vec, (v->cap + 1) * sizeof(void*));
-        // FIXME detect realloc failure
+        void ** new = realloc(v->vec, (2*v->cap + 1) * sizeof(void*));
+        if (!new)
+            return ENOMEM;
+        v->cap = 2*v->cap;
+        v->vec = new;
     }
     v->vec[v->len++] = item;
     v->vec[v->len]   = NULL;
+    return OK;
+}
+/*______________________________________________________________________________
+ *
+ * vector_push and vector_pop	Use the vector as a stack.
+ *
+ * vector_push is an alias for vector_append.
+ * vector_pop removes and returns the last item in the vector via *itemp.
+ *______________________________________________________________________________
+ */
+int
+vector_push(nft_vector * v, void * item)
+{
+    return vector_append(v, item);
+}
+int
+vector_pop(nft_vector * v, void ** itemp)
+{
+    if (!itemp)
+        return EINVAL;
+    if (!v->len) {
+        *itemp = NULL;
+        return ENOENT;
+    }
+    *itemp = v->vec[--v->len];
     return OK;
 }
 /*______________________________________________________________________________
@@ -344,9 +371,11 @@ int
 vector_insert(nft_vector *v, void *item)
 {
     if (v->len == v->cap) {
+        void ** new = realloc(v->vec, (2*v->cap + 1) * sizeof(void*));
+        if (!new)
+            return ENOMEM;
 	v->cap = 2*v->cap;
-        v->vec = realloc(v->vec, (v->cap + 1) * sizeof(void*));
-        // FIXME detect realloc failure
+        v->vec = new;
     }
     // Find the position where this item should be inserted.
     nft_slice s = vector_find(v, item, (nft_slice){ 0, v->len });
@@ -710,6 +739,22 @@ nft_vector_append(nft_vector_h h, void * item)
     }
     return result;
 }
+int
+nft_vector_push(nft_vector_h h, void * item)
+{
+    return nft_vector_append(h, item);
+}
+int
+nft_vector_pop(nft_vector_h h, void ** itemp)
+{
+    int result = EINVAL;
+    nft_vector * vector = nft_vector_lookup(h);
+    if (vector) {
+        result = vector_pop(vector, itemp);
+        nft_vector_discard(vector);
+    }
+    return result;
+}
 nft_vector_h
 nft_vector_sort(nft_vector_h h)
 {
@@ -915,6 +960,18 @@ static void test_public(void)
 {
     nft_vector_h v = nft_vector_new(4, vector_integer_comparator);
 
+    // Test nft_vector_push() and nft_vector_pop().
+    void * item = NULL;
+    for (int i = 0; i < ITEST_LEN ; i++)
+        assert(0 == nft_vector_push(v, (void*) itest[i]));
+    for (int i = ITEST_LEN - 1; i >= 0; i--) {
+        assert(0 == nft_vector_pop(v, &item));
+        assert(item == (void*) itest[i]);
+    }
+    assert(0      == nft_vector_len(v));
+    assert(ENOENT == nft_vector_pop(v, &item));
+    assert(NULL   == item);
+
     // Test vector_append().
     for (int i = 0; i < ITEST_LEN ; i++)
 	nft_vector_append(v, (void*) itest[i]);
@@ -1033,6 +1090,21 @@ static void test_private(void)
         assert(y->len == 3);
 
         vector_free(y);
+        vector_free(x);
+    }
+
+    // Test vector_push() and vector_pop().
+    {
+        nft_vector * x = vector_new(4, vector_integer_comparator);
+        void       * item = NULL;
+        for (int i = 0; i < ITEST_LEN ; i++)
+            assert(0 == vector_push(x, (void*) itest[i]));
+        for (int i = ITEST_LEN - 1; i >= 0; i--) {
+            assert(0 == vector_pop(x, &item));
+            assert(item == (void*) itest[i]);
+        }
+        assert(ENOENT == vector_pop(x, &item));
+        assert(NULL   == item);
         vector_free(x);
     }
 

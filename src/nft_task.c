@@ -1118,10 +1118,10 @@ struct timespec mark, done;
 void
 test_time()
 {
-    struct timespec zero = (struct timespec){ 0, 0 };
-    struct timespec half = (struct timespec){ 0, 500000000 };
-    struct timespec one  = (struct timespec){ 1, 0 };
-    struct timespec test = (struct timespec){ 0, 2000000000 };
+    struct timespec zero = { 0, 0 };
+    struct timespec half = { 0, 500000000 };
+    struct timespec one  = { 1, 0 };
+    struct timespec test = { 0, 2000000000 };
 
     printf("Testing nft_timespec_add, _comp and _norm...");
 
