@@ -35,6 +35,9 @@
 #ifndef _NFT_GETTIME_H_
 #define _NFT_GETTIME_H_
 
+#include <assert.h>
+#include <stdint.h>
+
 // Select the default time source by uncommenting one of these defines:
 //
 #if !defined(USE_FTIME) && !defined(USE_GETTIMEOFDAY) && !defined(USE_CLOCKGETTIME)

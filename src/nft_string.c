@@ -73,7 +73,7 @@ nft_string_destroy(nft_core * core)
     nft_core_destroy(core);
 }
 
-// The constructor should accept class and size parameters,
+// The _create constructor accepts class and size parameters,
 // so that further subclasses can be derived from this subclass.
 nft_string *
 nft_string_create(const char * class, size_t size, const char * string)
@@ -84,10 +84,10 @@ nft_string_create(const char * class, size_t size, const char * string)
     return object;
 }
 
-// You can also provide a simple constructor, for convenience.
-nft_string *
+//  The _new constructor takes only the string and returns a handle.
+nft_string_h
 nft_string_new(const char * string) {
-    return nft_string_create(nft_string_class, sizeof(nft_string), string);
+    return nft_string_handle(nft_string_create(nft_string_class, sizeof(nft_string), string));
 }
 
 // This function demonstrates the use of nft_string_lookup/_discard,
@@ -119,8 +119,7 @@ int
 main(int argc, char *argv[])
 {
     // Create the original instance, and save its handle in the variable h.
-    nft_string * o = nft_string_new("my string");
-    nft_string_h h = nft_string_handle(o);
+    nft_string_h h = nft_string_new("my string");
 
     // Look up the handle to obtain a second reference to the original instance.
     nft_string * r = nft_string_lookup(h);
@@ -134,7 +133,7 @@ main(int argc, char *argv[])
 
     // Now discard the original reference. This will decrement its reference
     // count to zero, causing the object to be destroyed.
-    nft_string_discard(o);
+    nft_string_discard(r);
 
     // The handle has been deleted, so lookup will now fail.
     r = nft_string_lookup(h);

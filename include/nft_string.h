@@ -47,14 +47,15 @@ typedef struct nft_string
 //   nft_string_h   nft_string_handle(const nft_string * s);
 //   nft_string *   nft_string_lookup(nft_string_h h);
 //   void           nft_string_discard(nft_string * s);
-//   nft_string_h * nft_string_list(void);
 //
 NFT_DECLARE_WRAPPERS(nft_string,)
 
 // Declare public APIs for our string package
-nft_string * nft_string_new(const char * data);
+nft_string_h nft_string_new(const char * data);
+void         nft_string_print(nft_string_h handle);
+
+// These calls should only be used when subclassing nft_string.
 nft_string * nft_string_create(const char * class, size_t size, const char * data);
 void         nft_string_destroy(nft_core * p);
-void         nft_string_print(nft_string_h handle);
 
 #endif // _NFT_STRING_H_

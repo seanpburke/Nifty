@@ -776,8 +776,7 @@ poll_input(void * arg)
 	// instead, is to add stress to the handle subsystem,
 	// by making the workers call _lookup/_discard.
 	//
-	nft_string * object = nft_string_new(buff);
-        nft_string_h handle = nft_string_handle(object);
+        nft_string_h handle = nft_string_new(buff);
 	if ((rc = nft_queue_add(q, handle))) break;
 	countin++;
     }
