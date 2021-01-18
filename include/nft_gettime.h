@@ -1,5 +1,5 @@
 /******************************************************************************
- * (C) Copyright Xenadyne, Inc. 2002-2013  All rights reserved.
+ * (C) Copyright Xenadyne, Inc. 2002-2021  All rights reserved.
  * 
  * Permission to use, copy, modify and distribute this software for
  * any purpose and without fee is hereby granted, provided that the 
@@ -61,13 +61,14 @@
 
 // Ensure that struct timespec is defined.
 //
-#ifndef _WIN32
-#include <sys/time.h>
-#else
+#ifdef _WIN32
 struct	timespec {
 	time_t tv_sec;
 	long   tv_nsec;
 };
+#define inline __inline
+#else
+#include <sys/time.h>
 #endif
 
 // nft_gettime returns the current time as a struct timespec, converting if necessary.

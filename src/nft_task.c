@@ -459,9 +459,6 @@ nft_task_this(void)
 /*******		HEAP IMPLEMENTATION				*******/
 /*******								*******/
 /******************************************************************************/
-#ifdef _WIN32
-#define inline __inline
-#endif
 
 /* comp_tasks
  *
@@ -1116,7 +1113,7 @@ struct timespec mark, done;
 #define ELAPSED 0.000000001 * nft_timespec_comp(done, mark)
 
 void
-test_time()
+test_timespec()
 {
     struct timespec zero = { 0, 0 };
     struct timespec half = { 0, 500000000 };
@@ -1202,7 +1199,7 @@ int
 main(int argc, char *argv[])
 {
     // Test the inline functions in nft_gettime.h.
-    test_time();
+    test_timespec();
 
     // Test the heap-sort implementation.
     test_heap();
