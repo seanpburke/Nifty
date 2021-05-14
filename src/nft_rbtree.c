@@ -660,6 +660,64 @@ rbtree_insert(nft_rbtree *tree,  void * key,  void * data)
 
 /*-----------------------------------------------------------------------------
  *
+ * rbtree_replace	Insert the key, or update an existing entry.
+ *
+ * Returns:	2	An existing key-data pair was replaced.
+ *			The *data was overwritten with the previous data.
+ *		1	A new node was inserted successfully.
+ *		0	The key-data pair could not be inserted.
+ *
+ *-----------------------------------------------------------------------------
+ */
+int
+rbtree_replace(nft_rbtree *tree, void *key, void **data)
+{
+    int result = 0;
+
+    if (!tree) return 0;
+    if (tree->locking) rbtree_wrlock(tree);
+
+    RBTREE_COMPARE compare = tree->compare;
+    nft_rbnode   * nodes   = tree->nodes;
+    long           comp    = -1;
+    unsigned       node;
+
+    // Find the given key.
+    for (node = ROOT;
+	 node != NIL && (comp = compare(key, KEY(node), *data, DATA(node)));
+	 node = (comp < 0) ? LEFT(node) : RIGHT(node));
+
+    // If key found, replace key and data, else insert a new node.
+    if (comp == 0) {
+        void * save = DATA(node);
+        KEY(node)   = key;
+	DATA(node)  = *data;
+        *data       = save;
+        result      = 2;
+    }
+    else {
+        assert(tree->next_free > 0);
+        assert(tree->next_free <= tree->num_nodes || tree->num_nodes == 0);
+
+        // Ensure that there is room to insert a key.
+        if (tree->next_free >= tree->num_nodes)
+            resize_nodes(tree, 2 * tree->num_nodes);
+
+        if (tree->next_free < tree->num_nodes) {
+            // The first node in an empty tree is made the left child of NIL.
+            if (tree->next_free == 1)
+                attach_leaf(tree, NIL, key, *data, 0);
+            else
+                insert_node(tree, key, *data);
+            result = 1;
+        }
+    }
+    if (tree->locking) rbtree_unlock(tree);
+    return result;
+}
+
+/*-----------------------------------------------------------------------------
+ *
  * rbtree_delete	Remove a key,data pair from the tree.
  * 			If duplex keys are in use, *data must be specified.
  *
@@ -732,39 +790,6 @@ rbtree_search(nft_rbtree *tree, void *key, void  **data)
     // Return data if key found.
     if ((comp == 0) && data)
 	*data = DATA(node);
-
-    if (tree->locking) rbtree_unlock(tree);
-    return (comp == 0);
-}
-
-/*-----------------------------------------------------------------------------
- *
- * rbtree_replace	Change the data of an existing key.
- *			Returns false if key is not found.
- *			Not usable with duplex keys.
- *
- *-----------------------------------------------------------------------------
- */
-int
-rbtree_replace(nft_rbtree *tree, void *key, void *data)
-{
-    if (!tree) return 0;
-
-    if (tree->locking) rbtree_rdlock(tree);
-
-    RBTREE_COMPARE compare = tree->compare;
-    nft_rbnode   * nodes   = tree->nodes;
-    long           comp    = -1;
-    unsigned       node;
-
-    // Find the given key.
-    for (node = ROOT;
-	 node != NIL && (comp = compare(key, KEY(node), data, DATA(node)));
-	 node = (comp < 0) ? LEFT(node) : RIGHT(node));
-
-    // If key found, change data.
-    if (comp == 0)
-	DATA(node) = data;
 
     if (tree->locking) rbtree_unlock(tree);
     return (comp == 0);
@@ -1038,7 +1063,7 @@ rbtree_validate( nft_rbtree * tree)
 
 /* These two comparators should cover most needs.
  */
-long rbtree_compare_pointers(void * h1, void * h2) { return (uintptr_t)h2 - (uintptr_t)h1; }
+long rbtree_compare_pointers(void * h1, void * h2) { return h2 > h1 ? 1 : h2 < h1 ? -1 : 0; }
 long rbtree_compare_strings (char * s1, char * s2) { return (long) strcmp(s1, s2); }
 
 
@@ -1111,7 +1136,7 @@ nft_rbtree_insert(nft_rbtree_h h, void  *key, void  *data)
     return result;
 }
 int
-nft_rbtree_replace(nft_rbtree_h h, void  *key, void  *data)
+nft_rbtree_replace(nft_rbtree_h h, void  *key, void  **data)
 {
     int          result = 0;
     nft_rbtree * rbtree = nft_rbtree_lookup(h);
@@ -1259,7 +1284,7 @@ test_basic(void)
     assert(!strcmp(value,"three"));
     rbtree_free(u);
 
-    printf("Testing basic operations: ");
+    printf("\nrbtree: testing basic operations: ");
 
     int    testn    = 20;
     char * test[20] = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
@@ -1278,9 +1303,17 @@ test_basic(void)
 	assert(data == test[i]);
     }
 
-    for (int i = 0; i < 10; i++)
-	assert(rbtree_replace(t, test[i], test[i]));
+    for (int i = 10; i < testn; i++) {
+        // First, insert a copy
+        void * copy = strdup(test[i]);
+	assert(1 == rbtree_replace(t, copy, &copy));
 
+        // Next, replace the copy with the original.
+        void * data = test[i];
+	assert(2 == rbtree_replace(t, data, &data));
+        assert(data == copy);
+        free(copy);
+    }
 
     for (int i = 0, result = rbtree_walk_first(t, &key, &data);
 	 result;
@@ -1290,7 +1323,8 @@ test_basic(void)
 	assert(data == test[i]);
     }
 
-    for (int i = 0; i < 10; i++) {
+    int num = rbtree_count(t);
+    for (int i = 0; i < num; i++) {
 	assert(rbtree_delete(t, test[i], (void**) &data));
 	assert(data == test[i]);
 	assert(rbtree_validate(t));
@@ -1357,7 +1391,7 @@ strcmp_duplex(char *key1, char *key2, char *tok1, char *tok2)
 static void
 test_duplex_keys(void)
 {
-    printf("Testing with a duplex comparator: ");
+    printf("rbtree: testing duplex comparator: ");
 
     nft_rbtree * u  = rbtree_create(nft_rbtree_class, sizeof(nft_rbtree), 10, strcmp_duplex);
 
@@ -1408,7 +1442,7 @@ test_private_api(void)
     int		result = 0;
     int 	i;
 
-    printf("\nTesting the pointer-based API\n");
+    printf("\nrbtree: testing the pointer-based API\n");
 
     /* Create a new tree with initial capacity of 512 nodes.
      */
@@ -1471,7 +1505,7 @@ test_handle_api(void)
     int		result = 0;
     int 	i;
 
-    printf("\nTesting the handle-based API\n");
+    printf("\nrbtree: testing the handle-based API\n");
 
     /* Create a new tree with 512 nodes allocated.
      * Be sure to allocate prior to allocating strings,

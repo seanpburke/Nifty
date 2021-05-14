@@ -26,17 +26,25 @@
  * tree algorithm. Therefore, you must also provide a comparison function
  * so that keys can be sorted.
  *
- * For example, assume that you have records that represent a person,
- * and that you wish to be able to look these records up by the name,
- * which is a string. In this case, you can use strcmp() as your
- * comparison function, with person.name as the key and &person as data.
+ * In order to serve as an associative map, the key and data values are
+ * stored separately in the tree nodes. In many cases, the key is part of
+ * the object that you wish to store. For example, assume that you have
+ * records that represent a person, and you wish to be able to access these
+ * records up by the name. Then your inserts would look like this:
+ *
+ *   nft_rtbree_insert(t, person->name, person);
+ *
+ * One benefit, is that you can use strcmp() as the comparison function
+ * for any tree whose keys are strings, instead of writing a separate
+ * comparator for every object type that you store.
  *
  * In addition to insert and search functions, this package provides
  * a tree walker which traverses the tree in key order, so that you can
  * do a linear search for non-key attributes.  There are also functions
- * for changing and deleting keys. The insert function will insert multiple
- * nodes with duplicate keys - use the _replace() opertion if that is not
- * desired. The only way to find all duplicates of a key walk the tree.
+ * for replacing and deleting keys. The insert function can insert multiple
+ * nodes with duplicate keys - it will not fail if the key alrady exists.
+ * The _replace() operation will replace an existing key-data pair instead.
+ * The only way to find all duplicates of a key walk the tree.
  *
  * Duplex Keys: You may wish to sort nodes on both key and data value.
  * In cases where you will be inserting duplicate keys, this allows you
@@ -48,8 +56,11 @@
  * have special requirements when using duplex keys, so read the notes
  * carefully.
  *
- * Multithreading: This package provides synchronization to allow multiple
- * threads to share access to a single rbtree.
+ * Multithreading: This package provides optional thread-safety.
+ * Each tree contains a shared-reader/exclusive-writer lock, that allows
+ * concurrent searches and traversals, and enforces exclusive insert,
+ * replace, and delete operations. But you MUST ENABLE locking via
+ * nft_rbtree_locking() - it is not enabled by default.
  *
  * Algorithm: This package implements the red-black balanced binary tree
  * algorithm as described in Sedgewick, chapter 15, to maintain semi-
@@ -112,22 +123,26 @@ int nft_rbtree_insert ( nft_rbtree_h tree,
 /*
  Inserts the key-data pair into the tree, using the comparator function
  that was supplied to rbtree-create. The key argument must be suitable for
- passing to the comparator. This function will insert duplicate keys - it
- does not overwrite the existing key-data pair if you insert a new pair
- with the identical key. Use nft_rbtree_replace() to change the data for an
- existing key. Returns 1 (true) on success, or zero when memory is exhausted.
+ passing to the comparator. This function will insert duplicate keys -
+ it does not overwrite the existing key-data pair if you insert a new pair
+ with an equivalent key. Use nft_rbtree_replace() if you wish for existing
+ key-data pairs to be replaced.
+ Returns 1 (true) on success, or zero when memory is exhausted.
 */
-
 
 //______________________________________________________________________________
 //
 int nft_rbtree_replace ( nft_rbtree_h   tree,
                          void         * key,
-                         void         * data );
+                         void         **data );
 /*
- Change the data of an existing key-data pair. Returns true if key is found,
- else false. If the key is not found, it is not inserted. This function is not
- to be used with duplex keys - instead you must do delete followed by insert.
+ Inserts the key-data pair, or replaces the existing pair if an equal key is found.
+ If an existing pair is replaced, the previous data value is stored in *data,
+ and the value 2 is returned. Returns 1 if the key-data was  inserted successfully,
+ without replacing a previous pair. Returns zero when  the key-data pair could not
+ be inserted due memory exhaustion.
+ This function is not to be used with duplex keys - instead you must first delete
+ any existing pair, and then insert the new pair.
 */
 
 //______________________________________________________________________________
@@ -142,8 +157,6 @@ int nft_rbtree_search ( nft_rbtree_h tree,
  specify a data value. If this key-data pair is found, nft_rbtree_search()
  replaces *data with the orignally inserted data and returns true.
 */
-
-
 
 //______________________________________________________________________________
 //
@@ -272,7 +285,7 @@ unsigned     rbtree_count       (nft_rbtree *);
 void         rbtree_locking     (nft_rbtree *, unsigned enabled);
 int          rbtree_validate    (nft_rbtree *);
 int          rbtree_insert      (nft_rbtree *, void  *key, void  *data);
-int          rbtree_replace     (nft_rbtree *, void  *key, void  *data);
+int          rbtree_replace     (nft_rbtree *, void  *key, void **data);
 int          rbtree_delete      (nft_rbtree *, void  *key, void **data);
 int          rbtree_search      (nft_rbtree *, void  *key, void **data);
 int          rbtree_walk_first  (nft_rbtree *, void **key, void **data);
