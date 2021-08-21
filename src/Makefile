@@ -35,7 +35,7 @@ LDLIBS		= -lpthread
 #
 LIBDIR	= ../lib
 LIB	= $(LIBDIR)/libnifty.a
-SRCS	= nft_core.c nft_handle.c nft_pool.c nft_queue.c nft_rbtree.c nft_string.c nft_task.c nft_vector.c nft_win32.c
+SRCS	= nft_core.c nft_handle.c nft_pool.c nft_queue.c nft_rbtree.c nft_sack.c nft_string.c nft_task.c nft_vector.c nft_win32.c
 OBJS	= $(SRCS:.c=.o)
 EXES	= $(SRCS:.c=)
 
@@ -48,6 +48,7 @@ test:	$(EXES)
 	$(VALGRIND) ./nft_queue  < /usr/share/dict/words
 	$(VALGRIND) ./nft_pool
 	$(VALGRIND) ./nft_rbtree < /usr/share/dict/words
+	$(VALGRIND) ./nft_sack   < /usr/share/dict/words
 	$(VALGRIND) ./nft_string
 	$(VALGRIND) ./nft_task
 	$(VALGRIND) ./nft_vector < /usr/share/dict/words
@@ -74,6 +75,9 @@ nft_queue: nft_queue.c ../include/nft_queue.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
 nft_rbtree: nft_rbtree.c ../include/nft_rbtree.h $(LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
+
+nft_sack: nft_sack.c ../include/nft_sack.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
 nft_string: nft_string.c ../include/nft_string.h $(LIB)

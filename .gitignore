@@ -5,6 +5,7 @@ src/nft_handle
 src/nft_pool
 src/nft_queue
 src/nft_rbtree
+src/nft_sack
 src/nft_string
 src/nft_task
 src/nft_vector
