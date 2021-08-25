@@ -45,6 +45,7 @@ all:	$(LIB)
 test:	$(EXES)
 	$(VALGRIND) ./nft_handle
 	$(VALGRIND) ./nft_core
+	$(VALGRIND) ./nft_list   < /usr/share/dict/words
 	$(VALGRIND) ./nft_queue  < /usr/share/dict/words
 	$(VALGRIND) ./nft_pool
 	$(VALGRIND) ./nft_rbtree < /usr/share/dict/words
@@ -66,6 +67,9 @@ nft_core: nft_core.c ../include/nft_core.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
 nft_handle: nft_handle.c ../include/nft_handle.h $(LIB)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
+
+nft_list: nft_list.c ../include/nft_list.h $(LIB)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DMAIN $@.c $(LIB) $(LDLIBS) -o $@
 
 nft_pool: nft_pool.c ../include/nft_pool.h $(LIB)
