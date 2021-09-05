@@ -69,8 +69,9 @@ sack_create(int size)
  * 	Frees sack and all of its chained sacks.
  *------------------------------------------------------------------------------
  */
-void sack_destroy(sack_t sack)
+void sack_destroy(sack_t * sackp)
 {
+    sack_t sack = *sackp;
     while (sack) {
         sack_t next = sack->next;
         assert(sack->free <= sack->size);
@@ -78,6 +79,7 @@ void sack_destroy(sack_t sack)
         free(sack);
         sack = next;
     }
+    *sackp = NULL;
 }
 
 /*------------------------------------------------------------------------------
@@ -95,6 +97,25 @@ sack_empty(sack_t sack)
         sack->free = 0;
         sack = sack->next;
     }
+}
+
+/*------------------------------------------------------------------------------
+ *	sack_total
+ *
+ *	Returns the total memory allocated in the sack, including any chained sacks.
+ *------------------------------------------------------------------------------
+ */
+long
+sack_total(sack_t sack)
+{
+    long total = 0;
+    while (sack) {
+        assert(sack->free <= sack->size);
+        assert(sack->data[sack->size] == 1);
+        total += sack->free;
+        sack   = sack->next;
+    }
+    return total;
 }
 
 /*------------------------------------------------------------------------------
@@ -337,14 +358,18 @@ int main(int argc, char *argv[])
 {
     {	// sack_insert and _insert_substring tests
         sack_t sk = sack_create(8);
+        assert( 0 == sack_total(sk));
         char * wd = sack_insert(sk, "tarantula");
         assert( 0 == sk->free);
         assert(10 == sk->next->free);
         assert(10 == sk->next->size);
+        assert(10 == sack_total(sk));
         char * sb = sack_insert_substring(sk, wd, 2, 4);
         assert(sb == sk->data);
         assert( 5 == sk->free);
         assert( 0 == strcmp(sb, "rant"));
+        sack_destroy(&sk);
+
         printf("sack_insert, _insert_substring tests passed\n");
     }
 
@@ -381,7 +406,8 @@ int main(int argc, char *argv[])
         sack_empty(sk);
         assert( 0   == sk->free);
         assert( 0   == sk->next->free);
-        sack_destroy(sk);
+        sack_destroy(&sk);
+
         printf("sack_stralloc, realloc tests passed\n");
     }
 
@@ -423,7 +449,7 @@ int main(int argc, char *argv[])
         sack_empty(sk);
         assert( 0   == sk->free);
         assert( 0   == sk->next->free);
-        sack_destroy(sk);
+        sack_destroy(&sk);
 
         printf("sack_strcat tests done\n");
     }
@@ -432,8 +458,7 @@ int main(int argc, char *argv[])
         int   printon = 0;
         int   limit = ((argc == 2) ? ((atoi(argv[1]) < MAXSTRINGS) ? atoi(argv[1]) : MAXSTRINGS) : MAXSTRINGS);
   
-        /* Read in the strings from stdin.
-         */
+        // Read in the strings from stdin.
         sack_t strs = sack_create(4064);
         for (int i = 0; i < limit; i++) {
             char * line = sack_stralloc(strs, 128);
@@ -479,9 +504,11 @@ int main(int argc, char *argv[])
                 printf("sack_strcat() relocated %s\n", word);
         }
         TIME;
-        printf("Time to insert %d strgs: %5.2f\n", limit, ELAPSED);
+        printf("Time to insert %d strings: %5.2f\n", limit, ELAPSED);
         sack_empty(sk);
-        sack_destroy(sk);
+        assert(0 == sack_total(sk));
+        sack_destroy(&sk);
+        sack_destroy(&strs);
     }
     exit(0);
 }

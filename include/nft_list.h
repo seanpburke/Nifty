@@ -31,7 +31,7 @@
  *
  * Note there is a test driver at the end of list.c that gives some
  * examples of usage. Also, bear in mind that functions in the list
- * package that modify the list take a list_t *, while those that 
+ * package that modify the list take a list_t *, while those that
  * will not change the list take a list_t.
  *
  * A list_t is defined to be a pointer to a struct list_node. The empty
@@ -42,7 +42,7 @@
  *
  * You can also use list_create() to create a list with an initial set
  * of items. list_create() takes a variable number of arguments, which
- * _must_ be terminated by NULL. The NULL is not entered on the list. 
+ * _must_ be terminated by NULL. The NULL is not entered on the list.
  * For example:
  *
  *	list_t my_list = list_create("one", "two", "three", NULL);
@@ -81,7 +81,7 @@
  * If you wish to consume the list as you iterate, meaning to process
  * every item in the list leaving the list empty, then the following
  * loop does the job:
- * 
+ *
  * 	while (my_list != NULL)
  * 	    process_my_data((my_data_t) list_pop( &my_list ));
  *
@@ -89,16 +89,16 @@
  * TYPE-SAFE WRAPPERS
  *
  * Since these calls take void pointers, there is little type checking
- * going on. If you wish to improve this, this package provides some 
- * macros that you can use to define a custom set of strongly-typed 
- * wrapper functions around the basic list package. For example, 
+ * going on. If you wish to improve this, this package provides some
+ * macros that you can use to define a custom set of strongly-typed
+ * wrapper functions around the basic list package. For example,
  * say you wish to make lists to hold pointers to instances of foo_t:
  *
  * typedef struct { ... } foo_t;
  *
  * The macro below defines the prototypes for your wrapper functions.
  * The first argument takes the place of 'list' in the function names,
- * the second defines the list type, and the last is the contained 
+ * the second defines the list type, and the last is the contained
  * object type. The fourth argument can be 'static' or 'extern', to
  * specify local or global linkage.
  *
@@ -107,8 +107,8 @@
  * The macro above creates the following definition:
  *
  *    typedef struct foo_list_t_node
- *    { 
- *	   foo_t           *first; 
+ *    {
+ *	   foo_t           *first;
  *	   foo_list_t_node *rest;
  *    } * foo_list_t;
  *
@@ -136,7 +136,7 @@
  * All of the other list_*() functions are wrapped in similar fashion,
  * Static linkage is preferred, as this will encourage your compiler
  * to inline these functions, eliminating the wrapper function call.
- * 
+ *
  *
  * ==== TIPS ====
  *
@@ -167,71 +167,55 @@ typedef struct list_node {
   struct list_node * rest;
 } * list_t;
 
-/* Push an item onto the front of the list.
- */
-void list_push  (list_t *l, void *p);
+// Push item onto the front of the list.
+void list_push  (list_t *l, void * item);
 
-/* Remove the first item in the list and returns it to caller.
- */
+// Remove and return the first item in the list.
 void *list_pop  (list_t *l);
 
-/* Return the first item in the list --- but leave the list undisturbed.
- * This is a convenience function, as it does the exact same thing as xx = list->first.
- */
+// Return the first item in the list --- but leave the list undisturbed.
+// This is a convenience function, as it does the exact same thing as xx = list->first.
 void *list_peek(list_t l);
 
-/* Return the nth item in the list.
- */
+// Return the nth item in the list.
 void *list_nth(list_t l, int n);
 
-/* Append an item to the end of the list.
- */
-void list_append(list_t *l, void *p);
+// Append item to the end of the list.
+void list_append(list_t *l, void *item);
 
-/* Reverses the order of the nodes in a list.
- */
+// Reverses the order of the list.
 void list_reverse(list_t *l);
 
-/* Attaches list 2 at the end of list 1.
- * List 2 will be empty afterward.
- */
-void list_cat(list_t *l, list_t *l2);
+// Attaches list 2 at the end of list 1.
+// List 2 will be empty afterward.
+void list_cat(list_t *l1, list_t *l2);
 
-/* Returns a copy of the given list.
- */
+// Returns a copy of the list.
 list_t list_copy(list_t l);
 
-/* Returns 1 if the given item is in the list, else 0.
- */
-int  list_search(list_t  l, void *p);
+// Returns 1 if the item is in the list, else 0.
+int  list_search(list_t  l, void *item);
 
-/* Removes every occurence of the given item from the list.
- */
-void * list_delete(list_t  *l, void *p);
+// Removes every occurence of the item from the list.
+void * list_delete(list_t  *l, void *item);
 
-/* Replaces every occurence of the item p with v in the list.
- */
+// Replaces every occurence of p with v in the list.
 void list_replace(list_t *l, void *p, void *v);
 
-/* Creates a list with the specified set of items. 
- * The argument list must be terminated by NULL.
- */
+// Creates a list with the specified set of items.
+// The argument list MUST be terminated by NULL.
 list_t list_create(void * first_item, ...);
 
-/* Frees all of the nodes in the list, setting the list to null.
- */
+// Frees all of the nodes in the list, setting the list to null.
 void list_destroy(list_t *l);
 
-/* Counts the number of items in the list.
- */
+// Counts the number of items in the list.
 unsigned list_count(list_t l);
 
-/* Applies function to each element of the list.
- */
+// Applies function to each element of the list.
 void list_apply(list_t l, void (*function)(void *));
 
-/* Apply function to every item on the list, returning a list of results.
- */
+// Apply function to every item on the list, returning a list of results.
 list_t list_map(list_t l, void * (*function)(void *));
 
 /* Reduce a list by calling the function, multiple times,
@@ -245,7 +229,7 @@ list_t list_map(list_t l, void * (*function)(void *));
    element is returned and the function is not executed. Using this function,
    you can implement operations like min, max, and sum.
 
-   For example: 
+   For example:
      void * least (void * a, void * b) { return strcmp((char*) a, (char*) b) < 0 ? a : b; }
      char * min = list_reduce(list, least);
  */
@@ -263,12 +247,7 @@ void ** list_to_array(list_t *l, int * nump);
  */
 int * list_to_int_array(list_t *lp, unsigned long * nump);
 
-/* Convert a list to a null-terminated array of long-sized items.
- */
+// Convert a list to a null-terminated array of long-sized items.
 long * list_to_long_array(list_t *lp, unsigned long * nump);
-
-/* Incremental garbage collector for the list free node pool.
- */
-void	list_gc( void );
 
 #endif // _NFT_LIST_H_

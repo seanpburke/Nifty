@@ -36,18 +36,23 @@
  *
  * The public calls in the nft_sack package are
  * 
- * sack_t sack_create(size);
+ * sack_t sack_create(size)
  *
- * 	Creates a string buffer with room for size bytes of storage
- *	in each buffer. Returns NULL if memory is not available.
+ * 	Creates an initial sack with room for size bytes of storage.
+ *	Additional chained sacks will default to this size as well.
+ *	Returns NULL if memory is not available.
  * 
- * void sack_destroy(sack_t);
+ * void sack_destroy(sack_t *)
  * 
  * 	Frees all of the memory allocated to the sack, including any chained sacks.
  * 
- * void sack_empty(sack_t);
+ * void sack_empty(sack_t)
  * 
  * 	Resets the sack to its empty state, inluding any chained sacks.
+ *
+ * long	sack_total(sack_t)
+ *
+ *	Returns the total memory allocated in the sack, including any chained sacks.
  * 
  * void *sack_alloc(sack_t, int size);
  *
@@ -68,15 +73,15 @@
  * char *sack_insert(sack_t, const char * string);
  *
  * 	Creates a copy of a null-terminated string, and returns a pointer
- *      to the copy. This call is faster than using strlen(), sbuff_alloc()
+ *	to the copy. This call is faster than using strlen(), sbuff_alloc()
  *	and strcpy(), because it does not precompute the string length.
- *      In most cases, the input string will only be traversed once.
+ *	In most cases, the input string will only be traversed once.
  *	Returns NULL if memory is not available.
  *
  * char *sack_insert_substring(sack_t head, const char *string, int start, int length);
  *
  * 	Similar to sack_insert, but you can select a substring.
- *      Returns NULL if either of the start or length arguments are negative,
+ *	Returns NULL if either of the start or length arguments are negative,
  *	or if memory is exhausted.
  * 
  * char * sack_strcat(sack_t b, char * string1, const char * string2);
@@ -102,8 +107,9 @@ typedef struct sack {
 } * sack_t;
 
 sack_t	  sack_create(int sz);
-void	  sack_destroy(sack_t);
+void	  sack_destroy(sack_t*);
 void	  sack_empty(sack_t);
+long      sack_total(sack_t);
 void	* sack_alloc(sack_t, int sz);
 void	* sack_realloc(sack_t, void *ptr, int sz);
 char	* sack_stralloc(sack_t, int sz);
