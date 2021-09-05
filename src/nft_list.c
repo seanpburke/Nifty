@@ -50,9 +50,8 @@ static pthread_mutex_t FreeListMutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_once_t  FreeListOnce  = PTHREAD_ONCE_INIT;
 static void freelist_init(void);
 
-/* Threads may opt to keep a free node list in thread-specific data,
- * by calling thread_specific_freelist_create().
- */
+// Threads may opt to keep a free node list in thread-specific data,
+// by calling thread_specific_freelist_create().
 static pthread_key_t	FreeListKey;
 static int		FreeListKeyStatus = -1;
 
@@ -66,12 +65,15 @@ static list_t * thread_specific_freelist_get() {
 static int thread_specific_freelist_create() {
     MUST_NOT(pthread_once(&FreeListOnce, freelist_init));
     if (FreeListKeyStatus == 0) {
-        list_t * base = malloc(sizeof(list_t *));
-        if (base) {
-            *base = NULL;
-            return pthread_setspecific(FreeListKey, base);
+        if (!pthread_getspecific(FreeListKey)) {
+            list_t * base = malloc(sizeof(list_t *));
+            if (base) {
+                *base = NULL;
+                return pthread_setspecific(FreeListKey, base);
+            }
+            return ENOMEM;
         }
-        return ENOMEM;
+        return 0; // It is OK to call this function twice.
     }
     return FreeListKeyStatus;
 }
@@ -86,11 +88,10 @@ static void thread_specific_freelist_destroy(void * arg) {
 // This runs exactly once, via FreeListOnce.
 static void freelist_init(void) {
     FreeListKeyStatus = pthread_key_create(&FreeListKey, thread_specific_freelist_destroy);
-    Sack = sack_create(4000);
+    Sack = sack_create(4064); // 254 nodes
 }
 
-/* Allocate a new list node.
- */
+// Allocate a new list node.
 static struct list_node *
 node_alloc()
 {
@@ -105,7 +106,6 @@ node_alloc()
             return node;
         }
     }
-
     // Otherwise try the global freelist.
     MUST_NOT(pthread_mutex_lock(&FreeListMutex));
     if (Free) {
@@ -134,14 +134,26 @@ nodes_free(struct list_node * head, struct list_node * tail)
     }
 }
 
+// Report the total number of list nodes allocated.
 static int
 nodes_allocated() {
     MUST_NOT(pthread_mutex_lock(&FreeListMutex));
-    long total = sack_total(Sack) / sizeof(struct list_node);
+    long total = sack_total(Sack);
     MUST_NOT(pthread_mutex_unlock(&FreeListMutex));
-    return total;
+    return total / sizeof(struct list_node);
 }
 
+/*-----------------------------------------------------------------------------
+ * list_enable_thread_freelist
+ *
+ * Installs a thread-local free-node list in the calling thread.
+ * This relieves contention for the FreeListMutex in threaded applications
+ * that use this package heavily, at the cost of fragmenting the free node pool.
+ *-----------------------------------------------------------------------------
+ */
+int list_enable_thread_freelist() {
+    return thread_specific_freelist_create();
+}
 
 /*-----------------------------------------------------------------------------
  * list_apply	Apply function to every item on the list.
@@ -150,7 +162,7 @@ nodes_allocated() {
 void list_apply(list_t l, void (*function)(void *))
 {
     for ( ; l ; l = l->rest )
-	function(l->first);
+        function(l->first);
 }
 
 /*-----------------------------------------------------------------------------
@@ -159,21 +171,40 @@ void list_apply(list_t l, void (*function)(void *))
  */
 void list_append(list_t *l, void *p)
 {
-    while (*l)
-	l = &(*l)->rest;
+    while (*l) l = &(*l)->rest;
     struct list_node * node = node_alloc();
-    node->first	= p;
-    node->rest	= NULL;
-    *l		= node;
+    node->first = p;
+    node->rest  = NULL;
+    *l          = node;
+}
+
+/*-----------------------------------------------------------------------------
+ * list_copy	 Returns a copy of the given list.
+ *-----------------------------------------------------------------------------
+ */
+list_t list_copy(list_t l)
+{
+    list_t  copy = NULL;
+    list_t *ptr  = &copy;
+
+    for ( ; l ; l = l->rest ) {
+        list_t cons = node_alloc();
+        cons->first = l->first;
+        *ptr        = cons;
+        ptr         = &cons->rest;
+    }
+    *ptr = NULL;
+
+    return copy;
 }
 
 /*-----------------------------------------------------------------------------
  * list_count	Counts the number of items in the list.
  *-----------------------------------------------------------------------------
  */
-unsigned list_count(list_t l)
+int list_count(list_t l)
 {
-    unsigned count = 0;
+    int count = 0;
     for ( ; l ; l = l->rest) count++;
     return count;
 }
@@ -188,14 +219,26 @@ unsigned list_count(list_t l)
  */
 list_t list_create(void * first, ...)
 {
-    va_list	ap;
-    list_t	l = NULL;
-
+    list_t  l = NULL;
+    va_list ap;
     for (va_start( ap, first);  first != NULL;  first = va_arg(ap, void*))
-	list_append(&l, first);
+        list_append(&l, first);
     va_end(ap);
 
     return l;
+}
+
+/*-----------------------------------------------------------------------------
+ * list_delete	Removes every occurence of the given item from the list.
+ *-----------------------------------------------------------------------------
+ */
+void list_delete(list_t *l, void *p)
+{
+    while (*l)
+        if ((*l)->first == p)
+            list_pop(l);
+        else
+            l = &(*l)->rest;
 }
 
 /*-----------------------------------------------------------------------------
@@ -257,7 +300,7 @@ void list_push(list_t *l, void *p)
     list_t node = node_alloc();
     node->first = p;
     node->rest  = *l;
-    *l		= node;
+    *l          = node;
 }
 
 /*-----------------------------------------------------------------------------
@@ -275,9 +318,9 @@ void * list_pop(list_t *l)
     void * result = NULL;
     list_t node   = *l;
     if (node) {
-	result	= node->first;
-	*l	= node->rest;
-	nodes_free(node, node);
+        result  = node->first;
+        *l      = node->rest;
+        nodes_free(node, node);
     }
     return result;
 }
@@ -297,19 +340,75 @@ void * list_reduce(list_t l, void * (*function)(void *, void *))
 {
     void * result = NULL;
     if (l) {
-	result = l->first;
-	while ((l = l->rest))
-	    result = function(result, l->first);
+        result = l->first;
+        while ((l = l->rest))
+            result = function(result, l->first);
     }
     return result;
+}
+
+/*-----------------------------------------------------------------------------
+ * list_reverse	Reverses the order of the nodes in a clist.
+ *-----------------------------------------------------------------------------
+ */
+void list_reverse(list_t *l)
+{
+    list_t src = *l;
+    list_t rev = 0;
+
+    while (src) {
+        list_t rest = src->rest;
+        src->rest   = rev;
+        rev         = src;
+        src         = rest;
+    }
+    *l = rev;
+}
+
+/*-----------------------------------------------------------------------------
+ * list_search	Returns 1 if the given item is in the list, else 0.
+ *-----------------------------------------------------------------------------
+ */
+int list_search(list_t l, void *p)
+{
+    for ( ; l ; l = l->rest)
+        if (l->first == p) return 1;
+    return 0;
+}
+
+/*-----------------------------------------------------------------------------
+ * list_to_array
+ *
+ * Convert a list to a null-terminated array of list items, freeing the list
+ * in the process. The nump argument, if non-null, is used to return the number
+ * of elements in the array, not counting the NULL terminator.
+ *
+ * Returns NULL on malloc failure, and the input list is unmodified.
+ *
+ *-----------------------------------------------------------------------------
+ */
+void **
+list_to_array(list_t *lp, int * nump)
+{
+    int     count = list_count(*lp);
+    void ** array = malloc((count + 1) * sizeof(void *));
+
+    if (array != NULL) {
+        void ** a = array;
+        while (*lp) *a++ = list_pop(lp);
+        *a = NULL;
+        if (nump != NULL)
+            *nump = count;
+    }
+    return array;
 }
 
 
 /******************************************************************************/
 /******************************************************************************/
-/*******								*******/
-/*******		LIST  PACKAGE TEST DRIVER			*******/
-/*******								*******/
+/*******                                                                *******/
+/*******                LIST  PACKAGE TEST DRIVER                       *******/
+/*******                                                                *******/
 /******************************************************************************/
 /******************************************************************************/
 #ifdef MAIN
@@ -327,12 +426,63 @@ struct timespec mark, done;
 #define TIME	done = nft_gettime()
 #define ELAPSED 0.000000001 * nft_timespec_comp(done, mark)
 
-#define MAX_WORDS 100000
-char * words[MAX_WORDS];
 
+// Functions to be used with list_{apply,map,reduce}
 static void   checker(void * arg) { assert(*(char*)arg == 'a'); }
 static void * mapper (void * arg) { checker(arg); return arg; }
 static void * least  ( void * a, void * b) { return (strcmp(a, b) < 0 ? a : b ); }
+
+#define WORDS_MAX 100000
+static char * Words[WORDS_MAX];
+static int    Count = 0;
+
+// Read strings from stdin and store them in Words[].
+int read_words(sack_t strs) {
+    int i;
+    for (i = 0; i < WORDS_MAX; i++) {
+        char * line = sack_stralloc(strs, 127);
+
+        if (fgets(line, 128, stdin)) {
+            int len = strlen(line);
+            // Trim any trailing linefeed.
+            if (line[len-1] == '\n') {
+                line[len-1]  = '\0';
+                len -= 1;
+            }
+            Words[i] = sack_realloc(strs, line, len + 1);
+        }
+        else {
+            sack_realloc(strs, line, 0);
+            break;
+        }
+    }
+    return i;
+}
+
+#define NUM_THREADS 4
+static pthread_t Threads[NUM_THREADS];
+
+// Thread worker to test the list-node allocater under contention.
+void * thread_worker(void * arg) {
+    intptr_t nt = (intptr_t) arg;
+    intptr_t rc = 0;
+
+    // Install a thread-specific free-node list in this thread.
+    // If you comment this out, you will see a BIG difference.
+    rc = list_enable_thread_freelist();
+
+    // Threads running this loop will contend heavily for the free-node list.
+    // It is not realistic, but it does hilite the benefit of per-thread free lists.
+    for (int round = 0; round < 1000; round++) {
+        // Each thread lists its own portion of Words.
+        list_t l = NULL;
+        for (int i = nt; i < Count; i += NUM_THREADS)
+            list_push(&l, Words[i]);
+        while (l)
+            list_pop(&l);
+    }
+    return (void*) rc;
+}
 
 int main(int argc, char *argv[])
 {
@@ -372,12 +522,40 @@ int main(int argc, char *argv[])
         assert(l->rest->rest->first == list[2]);
         assert(l->rest->rest->rest  == NULL);
         assert(3 == list_count(l));
+        assert(1 == list_search(l, list[0]));
+        assert(1 == list_search(l, list[1]));
+        assert(1 == list_search(l, list[2]));
+
+        list_t m = list_copy(l);
+        list_reverse(&m);
+        assert(m->first == list[2]);
+        assert(m->rest->first == list[1]);
+        assert(m->rest->rest->first == list[0]);
+        assert(m->rest->rest->rest  == NULL);
+        assert(3 == list_count(m));
+        assert(1 == list_search(l, list[0]));
+        list_delete(&m, list[1]);
+        assert(0 == list_search(m, list[1]));
+        assert(m->first == list[2]);
+        assert(m->rest->first == list[0]);
+        assert(m->rest->rest  == NULL);
+        list_delete(&m, list[0]);
+        assert(0 == list_search(m, list[0]));
+        assert(m->first == list[2]);
+        assert(m->rest  == NULL);
+        list_delete(&m, list[2]);
+        assert(0 == list_search(m, list[2]));
+        assert(m == NULL);
+        list_delete(&m, list[0]);
+        assert(m == NULL);
+
         list_destroy(&l);
         assert(l == NULL);
         list_destroy(&l);
-        assert(3 == list_count(Free));
-        assert(3 == nodes_allocated());
-        assert(3 * sizeof(struct list_node) == Sack->free);
+        assert(l == NULL);
+        assert(6 == list_count(Free));
+        assert(6 == nodes_allocated());
+        assert(6 * sizeof(struct list_node) == Sack->free);
     }
 
     {   // Test apply, map, reduce
@@ -398,64 +576,69 @@ int main(int argc, char *argv[])
         list_destroy(&l);
     }
 
-    {   // Performance tests on strings read from stdin.
-        int   printon = 0;
-        int   limit = ((argc == 2) ? atoi(argv[1]) : MAX_WORDS);
+    // Read in the strings from stdin and store them in Words[].
+    sack_t strs = sack_create(4064);
+    MARK;
+    Count = read_words(strs);
+    TIME;
+    printf("nft_list read    %d words: %5.2f sec\n", Count, ELAPSED);
 
-        // Set a thread-specific free-node list for this test.
-        assert(0 == thread_specific_freelist_create());
+    {   // Single-thread performance tests.
 
-        // Read in the strings from stdin.
+        // Push alls words onto a list.
+        list_t wlist = NULL;
+        int    i = 0;
         MARK;
-        sack_t strs = sack_create(4064);
-        for (int i = 0; i < limit; i++) {
-            char * line = sack_stralloc(strs, 127);
-
-            if (fgets(line, 128, stdin)) {
-                int len = strlen(line);
-                // Trim any trailing linefeed.
-                if (line[len-1] == '\n') {
-                    line[len-1]  = '\0';
-                    len -= 1;
-                }
-                words[i] = sack_realloc(strs, line, len + 1);
-            }
-            else {
-                sack_realloc(strs, line, 0);
-                limit = i;
-                break;
-            }
-        }
+        for (i = 0; i < Count; i++)
+            list_push(&wlist, Words[i]);
         TIME;
-        printf("nft_list read   %d words: %5.2f sec\n", limit, ELAPSED);
+        printf("nft_list insert  %d words: %5.2f sec\n", Count, ELAPSED);
+        assert(Count == list_count(wlist));
 
-        if (limit < 5) {
-            printf("Provide at least 5 keys!\n");
-            exit(0);
-        }
-        printon = (limit <= 20);
-
-        list_t b = NULL;
+        // Pop all words from the list.
         MARK;
-        for (int i = 0; i < limit; i++)
-            list_push(&b, words[i]);
+        while (wlist)
+            assert(list_pop(&wlist) == Words[--i]);
         TIME;
-        printf("nft_list insert %d strgs: %5.2f sec\n", limit, ELAPSED);
+        printf("nft_list pop     %d words: %5.2f sec\n", Count, ELAPSED);
+        list_destroy(&wlist);
 
-        MARK;
-        for (list_t t = b; t; t = t->rest) {
-            char * x = t->first;
-            if (printon) printf("walk:  %s\n", x);
-        }
-        TIME;
-        printf("nft_list walk   %d words: %5.2f sec\n", limit, ELAPSED);
-
-        assert(limit == list_count(b));
-        list_destroy(&b);
-
-        assert(limit == nodes_allocated());
-        sack_destroy(&Sack);
+        // Confirm that every node allocated has been returned to the free list.
+        assert(Count == nodes_allocated());
+        assert(Count == list_count(Free));
     }
+
+    {   // Multi-thread performance tests.
+        MARK;
+
+        // Launch the worker threads.
+        for (intptr_t i = 0; i < NUM_THREADS; i++)
+            assert(0 == pthread_create(&Threads[i], NULL, thread_worker, (void*) i));
+
+        // Join the worker threads.
+        void * thread_return;
+        for (int i = 0; i < NUM_THREADS; i++) {
+            assert(0 == pthread_join(Threads[i], &thread_return));
+            assert(NULL == thread_return);
+        }
+        TIME;
+        printf("nft_list threads %d words: %5.2f sec\n", Count, ELAPSED);
+
+        // Confirm that thread_specific_freelist_destroy() has returned
+        // all the per-thread freelist nodes to the global free list.
+        assert(Count == nodes_allocated());
+        assert(Count == list_count(Free));
+    }
+
+    // Free the sack from which list-node are allocated.
+    assert(Count == nodes_allocated());
+    sack_destroy(Sack);
+
+    // Free the sack holding the Words[] strings.
+    sack_destroy(strs);
+
+    printf("nft_list: All tests passed.\n");
+    exit(0);
 }
 
 #endif // MAIN

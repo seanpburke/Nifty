@@ -17,15 +17,21 @@
  *
  * Description: Lisp-style lists.
  *
- * The purpose of this package is to create singly-linked lists, where
- * the list pointers are stored in a `list_node' that is external to the
- * data structures stored on the list.
+ * The purpose of this package is to create singly-linked lists,
+ * where the list pointers are stored in a `list_node' that is separate
+ * from the objects stored on the list. This allows you to list any
+ * type of object - integers, strings, etc, and your objects can be
+ * on more than one list at the same time.
  *
- * One benefit is that you can make lists of data structures that don't
- * have internal fields for list-linking. For example, if you have an
- * array of integers, you can still form a list of elements of the array.
- * You also get the flexibility to place the same object on more than one
- * list simultaneously.
+ * One important feature for multi-threaded use, is that you can
+ * enable any thread to keep a thread-local cache of free nodes.
+ * This will reduce contention for the shared free node list,
+ * but you have to explicitly enable this on a per-thread basis.
+ * Call list_enable_thread_freelist() to create a private free
+ * node list in the calling thread.
+ *
+ * This package does not rely on nft_core or nft_handle, unlike
+ * most of the other packages in this library.
  *
  * USAGE
  *
@@ -60,6 +66,13 @@
  * 	    ...
  * 	}
  *
+ * If you wish to consume the list as you iterate, meaning to process
+ * every item in the list leaving the list empty, then the following
+ * loop does the job:
+ *
+ * 	while (my_list != NULL)
+ * 	    process_my_data((my_data_t) list_pop( &my_list ));
+ *
  * Beware of a common mistake that occurs when you delete items from
  * a list while you are traversing it - if we delete the item 'x'
  * in the loop above, the list node temp is freed, so the increment
@@ -77,13 +90,6 @@
  *	    if (...) list_delete(&my_list, x);  // RIGHT!
  *	    if (...) list_delete(&temp,     x);  // WRONG!
  * 	}
- *
- * If you wish to consume the list as you iterate, meaning to process
- * every item in the list leaving the list empty, then the following
- * loop does the job:
- *
- * 	while (my_list != NULL)
- * 	    process_my_data((my_data_t) list_pop( &my_list ));
  *
  *
  * TYPE-SAFE WRAPPERS
@@ -140,23 +146,18 @@
  *
  * ==== TIPS ====
  *
- * - There is a test driver at the end of nft_list.c that shows examples
- * of list usage.
+ * There is a test driver at the end of nft_list.c that demonstrate usage.
  *
- * - You can easily tell which functions in the list package
- * will modify the input list. Functions that modify their
- * argument take a list_t *, while those that will not
- * change the list take a list_t.
+ * You can easily tell which functions in the list package will modify
+ * the input list. Functions that modify their* argument take a list_t *,
+ * while those that will not change the list take a list_t.
  *
- * - list_append()'s time cost grows linearly with the list
- * length. This means that building a list of N items with
- * list_append() is an order N-squared operation. If you
- * are using list_append because you care about the order
- * of your list items, consider whether you can instead build
- * your list with list_push() and then do a list_reverse()
- * when the list is completed. This will create the list in
- * linear time, which is a huge advantage for long lists.
- *
+ * list_append()'s time cost grows linearly with the list length.
+ * This means that building a list of N items with list_append()
+ * is an Order(N-squared) operation. If you are using list_append()
+ * because you care about the order of your list items, consider
+ * whether you can instead build your list with list_push(),
+ * and then use list_reverse() after the list is complete.
  ******************************************************************************
  */
 #ifndef _NFT_LIST_H_
@@ -197,7 +198,7 @@ list_t list_copy(list_t l);
 int  list_search(list_t  l, void *item);
 
 // Removes every occurence of the item from the list.
-void * list_delete(list_t  *l, void *item);
+void list_delete(list_t  *l, void *item);
 
 // Replaces every occurence of p with v in the list.
 void list_replace(list_t *l, void *p, void *v);
@@ -210,7 +211,7 @@ list_t list_create(void * first_item, ...);
 void list_destroy(list_t *l);
 
 // Counts the number of items in the list.
-unsigned list_count(list_t l);
+int  list_count(list_t l);
 
 // Applies function to each element of the list.
 void list_apply(list_t l, void (*function)(void *));
@@ -238,16 +239,19 @@ void * list_reduce(list_t l, void * (*function)(void *, void *));
 /* Convert the list into a null-terminated array of list items.
  * The nump parameter, if non-null, returns the number of list elements,
  * not counting the null terminator. On success, the input list is destroyed.
- * If malloc fails, the input string is preserved and NULL is returned.
+ * If malloc fails, the input list is preserved and NULL is returned.
  */
 void ** list_to_array(list_t *l, int * nump);
 
-/* Convert a list to a null-terminated array of int-sized items.
- * Returns NULL on malloc failure, and the input list is unmodified.
+/* Install a thread-local free-node list in the calling thread.
+ * This relieves contention for the FreeListMutex in threaded applications
+ * that use this package heavily, at the cost of fragmenting the free node pool.
+ * Returns zero on success, else:
+ * EAGAIN The system lacked the necessary resources to create another
+ *        thread-specific data key, or the system-imposed limit on the total
+ *        number of keys per process {PTHREAD_KEYS_MAX} has been exceeded.
+ * ENOMEM Insufficient memory exists to create the key.
  */
-int * list_to_int_array(list_t *lp, unsigned long * nump);
-
-// Convert a list to a null-terminated array of long-sized items.
-long * list_to_long_array(list_t *lp, unsigned long * nump);
+int list_enable_thread_freelist();
 
 #endif // _NFT_LIST_H_

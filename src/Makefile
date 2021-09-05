@@ -29,13 +29,16 @@ LDLIBS		= -lpthread
 # Uncomment to use valgrind in the test programs.
 #VALGRIND	= valgrind --leak-check=full
 
+# Uncomment to use libgmalloc on MacOS.
+#VALGRIND	= env DYLD_INSERT_LIBRARIES=/usr/lib/libgmalloc.dylib
+
 ################################################################################
 #
 # You should not need to alter the definitions below.
 #
 LIBDIR	= ../lib
 LIB	= $(LIBDIR)/libnifty.a
-SRCS	= nft_core.c nft_handle.c nft_pool.c nft_queue.c nft_rbtree.c nft_sack.c nft_string.c nft_task.c nft_vector.c nft_win32.c
+SRCS	= nft_core.c nft_handle.c nft_list.c nft_pool.c nft_queue.c nft_rbtree.c nft_sack.c nft_string.c nft_task.c nft_vector.c nft_win32.c
 OBJS	= $(SRCS:.c=.o)
 EXES	= $(SRCS:.c=)
 

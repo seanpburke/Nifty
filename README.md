@@ -5,9 +5,11 @@ been very useful in my projects. The packages are:
 
 Package		| Description
 ----------------|----------------------------------------------
+nft_list	| Linked lists with thread-local free node cache.
 nft_pool	| Thread pool to execute tasks asynchronously.
-nft_queue	| Message queue for producer-consumer systems.
+nft_queue	| Inter-thread event queue or message channel.
 nft_rbtree	| Balanced red-black btree for associative mapping.
+nft_sack	| Bulk memory allocator used by nft_list.
 nft_task	| Schedule tasks to execute at a specified time.
 nft_vector	| Set operations using sorted arrays for peformance.
 nft_core	| The base class for the other Nifty packages.
@@ -385,7 +387,7 @@ always look like this:
         nft_core_discard(pointer);
     }
 ```
-To be type safe when working with subclasses of nft_core, we must use 
+To be type safe when working with subclasses of nft_core, we must use
 type-safe casting. Using our nft_string example, we cast the `nft_core *`
 to a `nft_string *` before using `nft_string` calls:
 ```C
@@ -526,5 +528,3 @@ Nifty packages to work within the limitations of nft_win32, and if you
 wish to use it, you should study the warnings in nft_win32.h. Nifty
 builds on MinGW using nft_win32 by default, so you will need to make
 adjustments in order to use pthread_win32.
-
-
