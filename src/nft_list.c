@@ -39,10 +39,10 @@
 #endif
 
 // List nodes are allocated from this nft_sack.
-static sack_t	Sack = NULL;
+static sack_t Sack = NULL;
 
 // Nodes that are not in use, are stored in this free-node list.
-static list_t	Free = NULL;
+static list_t Free = NULL;
 
 // The free-node list and sack are protected by the FreeListMutex,
 // and initialized by freelist_init(), controlled by FreeListOnce.
@@ -52,8 +52,8 @@ static void freelist_init(void);
 
 // Threads may opt to keep a free node list in thread-specific data,
 // by calling thread_specific_freelist_create().
-static pthread_key_t	FreeListKey;
-static int		FreeListKeyStatus = -1;
+static pthread_key_t FreeListKey;
+static int           FreeListKeyStatus = -1;
 
 static list_t * thread_specific_freelist_get() {
     MUST_NOT(pthread_once(&FreeListOnce, freelist_init));
@@ -422,8 +422,8 @@ list_to_array(list_t *lp, int * nump)
 
 // Timing stuff.
 struct timespec mark, done;
-#define MARK	mark = nft_gettime()
-#define TIME	done = nft_gettime()
+#define MARK    mark = nft_gettime()
+#define TIME    done = nft_gettime()
 #define ELAPSED 0.000000001 * nft_timespec_comp(done, mark)
 
 
