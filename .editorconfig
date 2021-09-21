@@ -12,7 +12,7 @@ insert_final_newline = true
 # Matches multiple files with brace expansion notation
 [*.{c,h,y,l}]
 indent_size  = 4
-indent_style = tab
+indent_style = space
 
 [Makefile]
 indent_style = tab
