@@ -179,6 +179,17 @@ void list_append(list_t *l, void *p)
 }
 
 /*-----------------------------------------------------------------------------
+ * list_cat	Concatenate list 1 and list 2. List 2 is nulled.
+ *-----------------------------------------------------------------------------
+ */
+void list_cat(list_t *l, list_t * l2)
+{
+    while (*l) l = &(*l)->rest;
+    *l  = *l2;
+    *l2 = NULL;
+}
+
+/*-----------------------------------------------------------------------------
  * list_copy	 Returns a copy of the given list.
  *-----------------------------------------------------------------------------
  */
@@ -232,13 +243,15 @@ list_t list_create(void * first, ...)
  * list_delete	Removes every occurence of the given item from the list.
  *-----------------------------------------------------------------------------
  */
-void list_delete(list_t *l, void *p)
+void * list_delete(list_t *l, void *p)
 {
+    void * r = NULL;
     while (*l)
         if ((*l)->first == p)
-            list_pop(l);
+            r = list_pop(l);
         else
             l = &(*l)->rest;
+    return r;
 }
 
 /*-----------------------------------------------------------------------------
@@ -534,7 +547,7 @@ int main(int argc, char *argv[])
         assert(m->rest->rest->rest  == NULL);
         assert(3 == list_count(m));
         assert(1 == list_search(l, list[0]));
-        list_delete(&m, list[1]);
+        assert(list_delete(&m, list[1]) == list[1]);
         assert(0 == list_search(m, list[1]));
         assert(m->first == list[2]);
         assert(m->rest->first == list[0]);

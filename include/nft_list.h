@@ -112,8 +112,7 @@
  *
  * The macro above creates the following definition:
  *
- *    typedef struct foo_list_t_node
- *    {
+ *    typedef struct foo_list_t_node {
  *	   foo_t           *first;
  *	   foo_list_t_node *rest;
  *    } * foo_list_t;
@@ -134,8 +133,7 @@
  *
  * This macro defines the wrapper for list_push() as:
  *
- *    extern void foo_push( foo_list_t *list, foo_t *data)
- *    {
+ *    extern void foo_push( foo_list_t *list, foo_t *data) {
  * 	   list_push((list_t *) list, (void *) node);
  *    }
  *
@@ -198,10 +196,10 @@ list_t list_copy(list_t l);
 int  list_search(list_t  l, void *item);
 
 // Removes every occurence of the item from the list.
-void list_delete(list_t  *l, void *item);
+void * list_delete(list_t  *l, void *item);
 
 // Replaces every occurence of p with v in the list.
-void list_replace(list_t *l, void *p, void *v);
+// void list_replace(list_t *l, void *p, void *v);
 
 // Creates a list with the specified set of items.
 // The argument list MUST be terminated by NULL.
@@ -253,5 +251,180 @@ void ** list_to_array(list_t *l, int * nump);
  * ENOMEM Insufficient memory exists to create the key.
  */
 int list_enable_thread_freelist();
+
+
+/* Here is a set of macros to create strongly-typed wrappers
+ * for the list_* calls. When these macros are instantiated,
+ * you must specifies substitutions for:
+ *
+ *	root  .. replaces "list" in list_push, list_pop, etc.
+ *	ltype .. list type, replaces list_t
+ *	dtype .. data type, replaces void *
+ *
+ * For example, the macro below defines a list node whose `first'
+ * field points to the user's `dtype' data structure.
+ */
+#define LIST_NODE(ltype, dtype) \
+typedef struct ltype##_node { \
+      dtype 		  *first; \
+      struct ltype##_node *rest;  \
+} * ltype
+
+
+/* Here is a custom prototype for the _push() function.
+ */
+#define LIST_PUSH_P(root, ltype, dtype) \
+void root##_push(ltype *l, dtype *p)
+
+/* And here is the custom wrapper for list_push().
+ */
+#define LIST_PUSH(root, ltype, dtype) \
+LIST_PUSH_P (root, ltype, dtype) \
+{ list_push((list_t *) l, p); }
+
+
+#define LIST_POP_P(root, ltype, dtype) \
+dtype * root##_pop (ltype *l)
+
+#define LIST_POP(root, ltype, dtype) \
+LIST_POP_P(root, ltype, dtype) \
+{ return( (dtype *) list_pop((list_t *) l) ); }
+
+
+#define LIST_PEEK_P(root, ltype, dtype) \
+dtype * root##_peek (ltype l)
+
+#define LIST_PEEK(root, ltype, dtype) \
+LIST_PEEK_P(root, ltype, dtype) \
+{ return( (dtype *) list_peek((list_t) l) ); }
+
+
+#define LIST_NTH_P(root, ltype, dtype) \
+dtype * root##_nth (ltype l, int n)
+
+#define LIST_NTH(root, ltype, dtype) \
+LIST_NTH_P(root, ltype, dtype) \
+{ return( (dtype *) list_nth((list_t) l, n) ); }
+
+
+#define LIST_APPEND_P(root, ltype, dtype) \
+void root##_append(ltype *l, dtype *p)
+
+#define LIST_APPEND(root, ltype, dtype) \
+LIST_APPEND_P(root, ltype, dtype) \
+{ list_append((list_t *) l, p); }
+
+
+#define LIST_REVERSE_P(root, ltype, dtype) \
+void root##_reverse(ltype *l)
+
+#define LIST_REVERSE(root, ltype, dtype) \
+LIST_REVERSE_P(root, ltype, dtype) \
+{ list_reverse((list_t *) l); }
+
+
+#define LIST_CAT_P(root, ltype, dtype) \
+void root##_cat(ltype *l, ltype *l2)
+
+#define LIST_CAT(root, ltype, dtype) \
+LIST_CAT_P(root, ltype, dtype) \
+{ list_cat((list_t *) l, (list_t *) l2); }
+
+
+#define LIST_COPY_P(root, ltype, dtype) \
+ltype root##_copy(ltype l)
+
+#define LIST_COPY(root, ltype, dtype) \
+LIST_COPY_P(root, ltype, dtype) \
+{ return( (ltype) list_copy((list_t) l) ); }
+
+
+#define LIST_SEARCH_P(root, ltype, dtype) \
+int root##_search(ltype l, dtype *p)
+
+#define LIST_SEARCH(root, ltype, dtype) \
+LIST_SEARCH_P(root, ltype, dtype) \
+{ return( list_search((list_t) l, p) ); }
+
+
+#define LIST_DELETE_P(root, ltype, dtype) \
+dtype * root##_delete(ltype *l, dtype *p)
+
+#define LIST_DELETE(root, ltype, dtype) \
+LIST_DELETE_P(root, ltype, dtype) \
+{ return list_delete((list_t *) l, p); }
+
+
+#define LIST_REPLACE_P(root, ltype, dtype) \
+void root##_replace(ltype *l, dtype *p, dtype *v)
+
+#define LIST_REPLACE(root, ltype, dtype) \
+LIST_REPLACE_P(root, ltype, dtype) \
+{ list_replace((list_t *) l, p, v); }
+
+
+#define LIST_DESTROY_P(root, ltype, dtype) \
+void root##_destroy(ltype *l)
+
+#define LIST_DESTROY(root, ltype, dtype) \
+LIST_DESTROY_P(root, ltype, dtype) \
+{ list_destroy((list_t *) l); }
+
+
+#define LIST_COUNT_P(root, ltype, dtype) \
+int root##_count(ltype l)
+
+#define LIST_COUNT(root, ltype, dtype) \
+LIST_COUNT_P(root, ltype, dtype) \
+{ return( list_count((list_t) l) ); }
+
+
+#define LIST_APPLY_P(root, ltype, dtype) \
+void root##_apply(ltype l, void (*function)(dtype *))
+
+#define LIST_APPLY(root, ltype, dtype) \
+LIST_APPLY_P(root, ltype, dtype) \
+{ list_apply((list_t) l, (void (*)(void*)) function); }
+
+
+#define LIST_TO_ARRAY_P(root, ltype, dtype) \
+dtype ** root##_to_array(ltype *l, int *nump)
+
+#define LIST_TO_ARRAY(root, ltype, dtype) \
+LIST_TO_ARRAY_P(root, ltype, dtype) \
+{ return( (dtype **) list_to_array((list_t *) l, nump) ); }
+
+#define LIST_PROTOTYPES(root, ltype, dtype, static) \
+LIST_NODE(ltype, dtype); \
+static LIST_PUSH_P(root, ltype, dtype); \
+static LIST_POP_P(root, ltype, dtype); \
+static LIST_PEEK_P(root, ltype, dtype); \
+static LIST_NTH_P(root, ltype, dtype); \
+static LIST_REVERSE_P(root, ltype, dtype); \
+static LIST_APPEND_P(root, ltype, dtype); \
+static LIST_CAT_P(root, ltype, dtype); \
+static LIST_COPY_P(root, ltype, dtype); \
+static LIST_SEARCH_P(root, ltype, dtype); \
+static LIST_DELETE_P(root, ltype, dtype); \
+static LIST_DESTROY_P(root, ltype, dtype); \
+static LIST_COUNT_P(root, ltype, dtype); \
+static LIST_APPLY_P(root, ltype, dtype); \
+static LIST_TO_ARRAY_P(root, ltype, dtype);
+
+#define LIST_WRAPPERS(root, ltype, dtype, static) \
+static LIST_PUSH(root, ltype, dtype) \
+static LIST_POP(root, ltype, dtype) \
+static LIST_PEEK(root, ltype, dtype) \
+static LIST_NTH(root, ltype, dtype) \
+static LIST_APPEND(root, ltype, dtype) \
+static LIST_REVERSE(root, ltype, dtype) \
+static LIST_CAT(root, ltype, dtype) \
+static LIST_COPY(root, ltype, dtype) \
+static LIST_SEARCH(root, ltype, dtype) \
+static LIST_DELETE(root, ltype, dtype) \
+static LIST_DESTROY(root, ltype, dtype) \
+static LIST_COUNT(root, ltype, dtype) \
+static LIST_APPLY(root, ltype, dtype) \
+static LIST_TO_ARRAY(root, ltype, dtype)
 
 #endif // _NFT_LIST_H_
