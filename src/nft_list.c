@@ -134,15 +134,6 @@ nodes_free(struct list_node * head, struct list_node * tail)
     }
 }
 
-// Report the total number of list nodes allocated.
-static int
-nodes_allocated() {
-    MUST_NOT(pthread_mutex_lock(&FreeListMutex));
-    long total = sack_total(Sack);
-    MUST_NOT(pthread_mutex_unlock(&FreeListMutex));
-    return total / sizeof(struct list_node);
-}
-
 /*-----------------------------------------------------------------------------
  * list_enable_thread_freelist
  *
@@ -439,6 +430,11 @@ struct timespec mark, done;
 #define TIME    done = nft_gettime()
 #define ELAPSED 0.000000001 * nft_timespec_comp(done, mark)
 
+// Report the total number of list nodes allocated.
+static int
+nodes_allocated() {
+    return sack_total(Sack) / sizeof(struct list_node);
+}
 
 // Functions to be used with list_{apply,map,reduce}
 static void   checker(void * arg) { assert(*(char*)arg == 'a'); }

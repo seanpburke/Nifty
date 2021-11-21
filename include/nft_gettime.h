@@ -41,8 +41,8 @@
 // Select the default time source by uncommenting one of these defines:
 //
 #if !defined(USE_FTIME) && !defined(USE_GETTIMEOFDAY) && !defined(USE_CLOCKGETTIME)
-#define USE_FTIME        1
-// #define USE_GETTIMEOFDAY 1
+// #define USE_FTIME        1
+#define USE_GETTIMEOFDAY 1
 // #define USE_CLOCKGETTIME 1
 #endif
 
