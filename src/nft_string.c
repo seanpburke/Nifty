@@ -114,6 +114,7 @@ nft_string_print(nft_string_h handle)
 #undef NDEBUG  // Enable asserts for test code.
 #endif
 #include <assert.h>
+#include <nft_handle.h>
 
 int
 main(int argc, char *argv[])
@@ -176,6 +177,9 @@ main(int argc, char *argv[])
 	// Don't forget to free the array of handles.
 	free(handles);
     }
+
+    // Verify that no Nifty handles remain.
+    assert(0 == nft_handle_apply(NULL, NULL, NULL));
 
     fprintf(stderr, "nft_string: All tests passed.\n");
     exit(0);

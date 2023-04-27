@@ -1,7 +1,10 @@
+[![status](https://github.com/seanpburke/Nifty/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/seanpburke/Nifty/actions)
+
 # Libnifty Overview
 
-This directory contains some nifty pthread packages that have
-been very useful in my projects. The packages are:
+This project contains pthread packages for use in multi-threaded C code.
+They use a low-overhead, reference-counting mechanism for accessing shared objects,
+which helps to protect against stale-pointer errors and memory leaks:
 
 Package		| Description
 ----------------|----------------------------------------------

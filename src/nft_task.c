@@ -718,6 +718,7 @@ heap_delete(heap_t *heap, long index)
 #else
 #define random    rand
 #endif
+#include <nft_handle.h>
 
 int Waiting = 0;
 
@@ -758,17 +759,17 @@ cancel_self(void * arg)
     Waiting = 0;
 }
 
-volatile int test_msec_count = 0;
+volatile int test_nsec_count = 0;
 
 void
-test_msec(void * arg)
+test_nsec(void * arg)
 {
     static long save = 0;
     long        msec = (long) arg;
     /* printf("%d\n", msec); */
     assert(save <= msec);
     save = msec;
-    test_msec_count--;
+    test_nsec_count--;
 }
 
 /* test_basic
@@ -796,8 +797,12 @@ test_basic() {
 	// Confirm that the scheduled tasks have executed.
 	for (int i = 0; i < count; i++) {
 	    sleep(1);
-	    assert(!nft_task_cancel(task[i]));
+	    assert(NULL == nft_task_cancel(task[i]));
 	}
+
+        // Verify that no Nifty handles remain.
+        assert(0 == nft_handle_apply(NULL, NULL, NULL));
+
 	fprintf(stderr, "Passed!\n");
     }
 
@@ -817,6 +822,7 @@ test_basic() {
 	assert(NULL != task);
 	assert(arg  == nft_task_cancel(task)); // The first cancel should succeed.
 	assert(NULL == nft_task_cancel(task)); // The second cancel should fail.
+        assert(0 == nft_handle_apply(NULL, NULL, NULL)); // No tasks remain.
 	printf(" Passed!\n");
     }
 
@@ -836,6 +842,10 @@ test_basic() {
 
 	// nft_task_cancel should return the arg parameter.
 	assert(arg == nft_task_cancel(task));
+
+        // Verify that no Nifty handles remain.
+        assert(0 == nft_handle_apply(NULL, NULL, NULL));
+
 	printf(" Passed!\n");
     }
 
@@ -865,6 +875,10 @@ test_basic() {
 
 	// The dot task should be gone.
 	assert(NULL == nft_task_cancel(task));
+
+        // Verify that no Nifty handles remain.
+        assert(0 == nft_handle_apply(NULL, NULL, NULL));
+
 	printf(" Passed!\n");
     }
 
@@ -883,8 +897,8 @@ test_basic() {
 	while (Waiting)	{
 	    sleep(1);
 	}
-	// The task should be gone.
-	assert(NULL == nft_task_cancel(task));
+	assert(NULL == nft_task_cancel(task)); // The task should be gone.
+        assert(0 == nft_handle_apply(NULL, NULL, NULL)); // No tasks remain.
 	printf(" Passed!\n");
     }
 
@@ -895,33 +909,35 @@ test_basic() {
 	fflush(stdout);
 
 	/* Create a bunch of tasks over a 10-second interval.
-	 * Function test_msec() verifies that tasks execute in correct order.
+	 * Function test_nsec() verifies that tasks execute in correct order.
 	 * The interval starts one second from now, so we expect all
 	 * of the tasks to be created before the first one executes.
 	 */
-	struct timespec absolute = nft_gettime();
+	struct timespec now = nft_gettime();
 	for (i = 0; i < n; i++) {
-	    long  msec = random() % 10000;
-	    struct timespec ts = {
-		absolute.tv_sec	 + (msec / 1000) + 1,
-		absolute.tv_nsec + (msec % 1000) * 1000000
-	    };
-	    nft_task_h task = nft_task_schedule(ts, (struct timespec){0,0}, test_msec, (void*) msec);
+	    long            nsec = random() % 10 * NANOSEC;
+            struct timespec rand = (struct timespec){1, nsec};
+	    struct timespec when = nft_timespec_add(now, rand);
+            struct timespec once = (struct timespec){0, 0};
+	    nft_task_h      task = nft_task_schedule(when, once, test_nsec, (void*) nsec);
 	    assert(task);
 	}
 
 	/* Wait for all of the tasks to finish.
-	 * The first assert tests that no test_msec task has run as yet.
+	 * The first assert tests that no test_nsec task has run as yet.
 	 */
-	assert(test_msec_count == 0);
-	test_msec_count = i;
-	while (test_msec_count > 0) {
+	assert(test_nsec_count == 0);
+	test_nsec_count = i;
+	while (test_nsec_count > 0) {
 	    sleep(1);
 	    putc('.', stdout);
 	    fflush(stdout);
 	}
 	assert(Queue.count == 0);
 	assert(Queue.size  == MIN_SIZE);
+
+        // Verify that no Nifty handles remain.
+        assert(0 == nft_handle_apply(NULL, NULL, NULL));
 
 	printf(" Passed!\n");
     }
@@ -938,26 +954,27 @@ test_basic() {
 	 * interval beginning now. The intent is to overlap task creation
 	 * and execution.
 	 */
-	struct timespec absolute = nft_gettime();
+	struct timespec now = nft_gettime();
 	for (i = 0; i < n; i++)
 	{
-	    int msec = random() % 1000;
-	    struct timespec ts = {
-		absolute.tv_sec	 + (msec / 1000),
-		absolute.tv_nsec + (msec % 1000) * 1000000
-	    };
-	    nft_task_h task = nft_task_schedule(ts, (struct timespec){0,0}, null_task, NULL);
+	    long            nsec = random() % NANOSEC;
+	    struct timespec when = nft_timespec_add(now, (struct timespec){0, nsec});
+            struct timespec once = (struct timespec){0, 0};
+	    nft_task_h      task = nft_task_schedule(when, once, null_task, NULL);
 	    assert(task);
 	}
 
 	// Wait for all of the tasks to finish.
-	while (Queue.count > 0)
-	{
+	while (Queue.count > 0) {
 	    sleep(1);
 	    putc('.', stdout);
 	    fflush(stdout);
 	}
+	assert(Queue.count == 0);
 	assert(Queue.size  == MIN_SIZE);
+
+        // Verify that no Nifty handles remain.
+        assert(0 == nft_handle_apply(NULL, NULL, NULL));
 
 	printf(" Passed!\n");
     }
@@ -1043,7 +1060,7 @@ nft_task_pool_create(struct timespec abstime,
     return nft_task_pool_cast(task);
 }
 
-// nft_task_pool_schedule is just a slight varation on nft_task_schedule.
+// nft_task_pool_schedule is just a slight variation on nft_task_schedule.
 nft_task_pool_h
 nft_task_pool_schedule(struct timespec abstime,
 		       struct timespec interval,
@@ -1090,16 +1107,25 @@ void test_nft_task_pool()
     // Just change nft_task_pool_schedule to nft_task_schedule,
     // to see what would happen without the thread pool.
     //
-    for (int delay = 1; delay < 10; delay++) {
-	struct timespec when = nft_gettime();
-	when.tv_sec += delay;
+    for (int delay = 1; delay <= 10; delay++) {
+	struct timespec once = (struct timespec){0,0};
+	struct timespec when = nft_timespec_add(nft_gettime(), (struct timespec){delay,0});
 	long howlong = 10 - delay;
-	nft_task_pool_h ph = nft_task_pool_schedule(when, (struct timespec){0,0}, sleeper, (void*)howlong);
+	nft_task_pool_h ph = nft_task_pool_schedule(when, once, sleeper, (void*)howlong);
 	assert(ph != NULL);
     }
     // After all the tasks should have finished, confirm that the flags have been cleared.
     sleep(11);
-    for (int i = 1; i < 10; i++) assert(!flags[i]);
+    for (int i = 0; i < 10; i++) assert(!flags[i]);
+
+    // Verify that no tasks remain. nft_core_gather returns a NULL-terminated array.
+    nft_handle * handles = nft_core_gather(nft_task_pool_class);
+    assert(NULL != handles);
+    if (NULL != handles) {
+        assert(NULL == handles[0]);
+        free(handles);
+    }
+
     fputs("Passed!\n",stderr);
 }
 
