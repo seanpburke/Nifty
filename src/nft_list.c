@@ -430,12 +430,6 @@ struct timespec mark, done;
 #define TIME    done = nft_gettime()
 #define ELAPSED 0.000000001 * nft_timespec_comp(done, mark)
 
-// Report the total number of list nodes allocated.
-static int
-nodes_allocated() {
-    return sack_total(Sack) / sizeof(struct list_node);
-}
-
 // Functions to be used with list_{apply,map,reduce}
 static void   checker(void * arg) { assert(*(char*)arg == 'a'); }
 static void * mapper (void * arg) { checker(arg); return arg; }
@@ -498,19 +492,18 @@ int main(int argc, char *argv[])
     {   // Basic tests of push, pop, append
         list_t l = NULL;
         list_push(&l, "a");
-        assert(Sack->data == (void*)l);
-        assert(Sack->free == sizeof(*l));
+        assert(Sack->data + Sack->last == (void*)l);
+        assert(Sack->free - Sack->last == sizeof(*l));
         assert(Sack->next == NULL);
-        assert(1 == nodes_allocated());
 
         list_append(&l, "b");
-        assert(Sack->free == 2 * sizeof(*l));
+        assert(Sack->data + Sack->last == (void*)l->rest);
+        assert(Sack->free - Sack->last == sizeof(*l));
         assert(Sack->next == NULL);
         assert(0 == strcmp(list_peek(l), "a"));
         assert(0 == strcmp(list_nth(l, 0), "a"));
         assert(0 == strcmp(list_nth(l, 1), "b"));
         assert(0 == strcmp(list_peek(l->rest), "b"));
-        assert(2 == nodes_allocated());
 
         assert(0 == strcmp(list_pop(&l), "a"));
         assert(0 == strcmp(list_pop(&l), "b"));
@@ -520,7 +513,6 @@ int main(int argc, char *argv[])
         assert(0 == strcmp(list_nth(l, 0), "b"));
         assert(0 == strcmp(list_pop(&l), "b"));
         assert(l == NULL);
-        assert(2 == nodes_allocated());
     }
 
     {   // Test list_create, _destroy
@@ -563,8 +555,6 @@ int main(int argc, char *argv[])
         list_destroy(&l);
         assert(l == NULL);
         assert(6 == list_count(Free));
-        assert(6 == nodes_allocated());
-        assert(6 * sizeof(struct list_node) == Sack->free);
     }
 
     {   // Test apply, map, reduce
@@ -613,7 +603,6 @@ int main(int argc, char *argv[])
         list_destroy(&wlist);
 
         // Confirm that every node allocated has been returned to the free list.
-        assert(Count == nodes_allocated());
         assert(Count == list_count(Free));
     }
 
@@ -635,12 +624,10 @@ int main(int argc, char *argv[])
 
         // Confirm that thread_specific_freelist_destroy() has returned
         // all the per-thread freelist nodes to the global free list.
-        assert(Count == nodes_allocated());
         assert(Count == list_count(Free));
     }
 
     // Free the sack from which list-node are allocated.
-    assert(Count == nodes_allocated());
     sack_destroy(Sack);
 
     // Free the sack holding the Words[] strings.

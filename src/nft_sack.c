@@ -1,5 +1,5 @@
 /***************************************************************************
- * (C) Copyright 2021 Xenadyne, Inc. ALL RIGHTS RESERVED
+ * (C) Copyright 2021-2023 Xenadyne, Inc. ALL RIGHTS RESERVED
  *
  * Permission to use, copy, modify and distribute this software for
  * any purpose and without fee is hereby granted, provided that the
@@ -53,6 +53,7 @@ sack_mark(sack_t sack) {
 // We allow data[size] to be written - it's handy for adding a null terminator.
 #define SACK_TEST(sack) \
     assert(sack->free <= sack->size); \
+    assert(sack->last <= sack->free); \
     assert(sack->data[sack->size + 1] == 1)
 
 
@@ -70,9 +71,7 @@ sack_create(int size)
 
     sack_t new = (sack_t) malloc(sizeof(struct sack) + size);
     if (new != NULL) {
-        new->next = NULL;
-        new->free = 0;
-        new->size = size;
+        *new = (struct sack){ .next = NULL, .free = 0, .last = 0, .size = size };
         sack_mark(new); // Dirty the malloced memory, for testing purposes.
         SACK_TEST(new);
     }
@@ -107,6 +106,7 @@ sack_empty(sack_t sack)
     while (sack) {
         SACK_TEST(sack);
         sack->free = 0;
+        sack->last = 0;
         sack = sack->next;
     }
 }
@@ -146,16 +146,21 @@ sack_alloc(sack_t sk, int size)
         SACK_TEST(sk);
 
         char * result = ALIGNED(sk->data + sk->free);
-        int    nfree  = (result + size) - sk->data;
-        if (sk->size >= nfree) {
-            sk->free   = nfree;
+        unsigned last = result - sk->data;
+        unsigned free = last + size;
+        if (free <= sk->size) {
+            sk->last = last;
+            sk->free = free;
             return result;
         }
 
         // If we are at the end of the chain, try to allocate another sack.
-        // Allocate the requested size, if it is larger than the default.
         if (!sk->next) {
-            sk->next = sack_create((size > sk->size) ? size : sk->size);
+            // If this item exceeds the default size, create a bigger sack.
+            // The capacity is slightly smaller for aligned allocations.
+            int adjust = offsetof(struct sack, data) % MALLOC_ALIGNMENT;
+            int sksize = (size > sk->size - adjust) ? size + adjust : sk->size;
+            sk->next = sack_create(sksize);
         }
     }
     return NULL;
@@ -182,14 +187,15 @@ char * sack_stralloc(sack_t sk, int size)
         // If this buffer has room, allocate and return.
         if (sk->size >= (sk->free + size)) {
             char * result = sk->data + sk->free;
+            sk->last = sk->free;
             sk->free += size;
             assert(sk->free <= sk->size);
             return result;
         }
 
         // If there are no more buffers in the chain, allocate a new one.
+        // Allocate the requested size, if larger than the default.
         if (!sk->next) {
-            // Allocate the requested size, if larger than the default.
             sk->next = sack_create((size > sk->size) ? size : sk->size);
         }
     }
@@ -199,9 +205,9 @@ char * sack_stralloc(sack_t sk, int size)
 /*------------------------------------------------------------------------------
  * sack_realloc
  *
- * Re-allocates an existing sack pointer to size newsize.
- * WARNING - The space is extended (or shrunk) in place,
- * so only the most recently allocated object can be realloced safely.
+ * Re-allocates an existing sack memory region to size newsize.
+ * WARNING Only the most-recently-allocated region can be extended
+ * (or shrunk) in place, so any other use will allocate new space.
  *------------------------------------------------------------------------------
  */
 void *
@@ -213,34 +219,58 @@ sack_realloc(sack_t head, void * pointer, int newsize)
     assert(newsize >= 0);
     if (newsize < 0) return NULL;
 
-    // Search the chain for the sack in which ptr is allocated.
+    // Search the chain for the sack in which ptr was allocated.
     // Return NULL if not found.
     sack_t sk = head;
     while ((ptr < sk->data) || (ptr > sk->data + sk->free))
         if (!(sk = sk->next))
             return NULL;
+    SACK_TEST(sk);
 
-    // Does this sack have room to extend this region?
-    // If so, simply adjust sk->free and return.
-    if (ptr + newsize <= sk->data + sk->size) {
-        sk->free = ptr + newsize - sk->data;
+    // Compute the offset of this region in the sack data array.
+    // Any pointer following the last region, must be bogus.
+    unsigned offset = ptr - sk->data;
+    assert(offset <= sk->last);
+    if (offset > sk->last) {
+        return NULL;
+    }
+
+    // It is a mistake to realloc any but the last-allocated region,
+    // since we can only shrink or grow the last region in the sack.
+    // But as a best-effort solution, we can allocate a new region.
+    if (offset < sk->last) {
+        // If ptr was aligned, ensure that the new region is too.
+        char * new = (ptr == ALIGNED(ptr))
+            ? sack_alloc(head, newsize)
+            : sack_stralloc(head, newsize-1);
+
+        if (new) {
+            // We do not know the size of the region at offset,
+            // only that it cannot be larger than (last - offset),
+            // so we copy the smaller of newsize or (last - offset).
+            int oldsize = (sk->last - offset) < newsize ? (sk->last - offset) : newsize;
+            memcpy(new, ptr, oldsize);
+        }
+        return new;
+    }
+
+    // The happy path: Since this is the last region in the sack,
+    // if there is room to extend the region, then we can simply
+    // adjust sk->free and return.
+    if (offset + newsize <= sk->size) {
+        sk->free = offset + newsize;
         return ptr;
     }
 
     // We will need to relocate the memory pointed to by ptr.
-    // If ptr was aligned, ensure that new region is too.
     char * new = (ptr == ALIGNED(ptr))
         ? sack_alloc(head, newsize)
         : sack_stralloc(head, newsize-1);
 
     if (new) {
-        // Compute the size of this region, assuming that nothing has been allocated
-        // subsequent to this, so that sk->free indicates the end of ptr's allocation.
-        int oldsize = (sk->data + sk->free) - ptr;
-        memcpy(new, ptr, oldsize);
-
-        // Remove old string from
-        sk->free = ptr - sk->data;
+        // Copy data to the new region, and release the old region.
+        memcpy(new, ptr, sk->free - offset);
+        sk->free = offset;
     }
     return new;
 }
@@ -270,10 +300,10 @@ sack_insert(sack_t sack, const char *string)
     while (dst < end) {
         if (!(*dst++ = *src++)) {
             // We were able to copy the entire string.
-            char * result = sk->data + sk->free;
+            sk->last = sk->free;
             sk->free = dst - sk->data;
-            assert(sk->free <= sk->size);
-            return result;
+            SACK_TEST(sk);
+            return sk->data + sk->last;
         }
     }
     // There is not enough room. Allocate with sack_stralloc().
@@ -326,9 +356,14 @@ sack_strcat(sack_t head, char * string1, const char * string2)
         if (!(sk = sk->next))
             return NULL;
 
+    // It is an error to concatenate a string that is not the last.
+    assert(string1 == sk->data + sk->last);
+    if (string1 != sk->data + sk->last)
+        return NULL;
+
     // Attempt to copy string2, beginning with string1's terminating null.
     char * end  = sk->data + sk->size;
-    char * dst  = sk->data + sk->free - 1; // assert(*dst == '\0');
+    char * dst  = sk->data + sk->free - 1; assert(*dst == '\0');
     int    len1 = dst - string1;
     const char * src = string2;
     while (dst < end) {
@@ -392,34 +427,41 @@ int main(int argc, char *argv[])
     }
 
     {   // sack_stralloc,realloc tests
-        sack_t sk = sack_create(16);
-        char * bx = sack_stralloc(sk, 12);
-        assert(13 == sk->free);
-        assert(16 == sk->size);
+        sack_t sk = sack_create(12);
+        char * bx = sack_stralloc(sk, 8);
+        assert( 0 == sk->last);
+        assert( 9 == sk->free);
+        assert(12 == sk->size);
         assert(NULL == sk->next);
-        strcpy(bx, "giraffe");
+
+        // realloc should shrink bx in place
+        strcpy(bx, "foo");
         char * nx = sack_realloc(sk, bx, strlen(bx) + 1);
         assert(nx == bx);
-        assert(8  == sk->free);
+        assert(4  == sk->free);
 
         // An aligned alloc should fit in the first sack.
         char * af = sack_alloc(sk, 8);
-        assert(16 == sk->free);
+        assert( 4 == sk->last);
+        assert(12 == sk->free);
         assert(NULL == sk->next);
 
         // A realloc to zero should not move it.
         char * bf = sack_realloc(sk, af, 0);
         assert(bf == af);
-        assert(8  == sk->free);
+        assert( 4 == sk->last);
+        assert( 4 == sk->free);
         assert(NULL == sk->next);
 
         // A realloc to 12 should force a chained sack.
         char * cf = sack_realloc(sk, bf, 12);
         assert(cf != bf);
-        assert(8  == sk->free);
+        assert( 0 == ((intptr_t)cf % MALLOC_ALIGNMENT));
+        assert( 4 == sk->last);
+        assert( 4 == sk->free);
         assert(NULL != sk->next);
-        assert(12 == sk->next->free);
-        assert(16 == sk->next->size);
+        assert(cf == sk->next->data + sk->next->last);
+        assert(12 == sk->next->free - sk->next->last);
 
         sack_empty(sk);
         assert( 0 == sk->free);
@@ -470,6 +512,62 @@ int main(int argc, char *argv[])
         sack_destroy(sk);
 
         printf("sack_strcat tests passed\n");
+    }
+
+    {   // sack_stralloc/realloc with snprintf tests
+        sack_t sk = sack_create(64);
+
+        // allocate  string buffer of eight bytes
+        int    sz = 8;
+        char * bf = sack_stralloc(sk, sz - 1);
+        assert(0 == sk->last);
+        assert(8 == sk->free);
+
+        // write four bytes to the buffer
+        int wr = snprintf(bf, sz, "%s", "abc");
+        assert(wr == strlen("abc"));
+        assert(0  == strcmp("abc", bf));
+
+        // realloc the buffer to release unused space.
+        sz = wr + 1;
+        bf = sack_realloc(sk, bf, sz);
+        assert(0 == sk->last);
+        assert(4 == sk->free);
+        assert(0 == strcmp("abc", bf));
+
+        // attempt to write eight bytes to the four-byte buffer
+        wr = snprintf(bf, sz, "%s", "abcdefg");
+        assert(wr == strlen("abcdefg"));
+        assert(sz == strlen(bf) + 1);
+        assert(0  == strcmp("abc", bf));
+
+        // expand the buffer to provide the needed space
+        sz = wr + 1;
+        bf = sack_realloc(sk, bf, sz);
+        wr = snprintf(bf, sz, "%s", "abcdefg");
+        assert(wr == strlen("abcdefg"));
+        assert(sz == strlen(bf) + 1);
+        assert(0  == strcmp("abcdefg", bf));
+
+        // for example
+        int    size = 12;
+        char * arg  = "ambidextrous";
+        assert(strlen(arg) == size);
+        char * buff = sack_stralloc(sk, size);
+        int    len  = snprintf(buff, size, "%s", arg);
+        assert(len == size);
+        assert(strlen(buff) == len - 1);
+        buff = sack_realloc(sk, buff, len + 1);
+        assert(NULL != buff);
+        if (len >= size) {
+            snprintf(buff, len + 1, "%s", arg);
+        }
+        assert(0 == strcmp(buff, arg));
+
+        sack_empty(sk);
+        sack_destroy(sk);
+
+        printf("sack_stralloc/realloc with snprintf tests passed\n");
     }
 
     { // Performance tests on strings read from stdin.

@@ -1,5 +1,5 @@
 /***************************************************************************
- * (C) Copyright 2021 Xenadyne, Inc. ALL RIGHTS RESERVED
+ * (C) Copyright 2021-2023 Xenadyne, Inc. ALL RIGHTS RESERVED
  *
  * Permission to use, copy, modify and distribute this software for
  * any purpose and without fee is hereby granted, provided that the
@@ -21,7 +21,7 @@
  *
  * This package offers a flexible, efficient means for allocating memory
  * in mixed sizes, that you will free all at once (in bulk), when some
- * transaction*has been completed. A sack initially consists of a single
+ * transaction has been completed. A sack initially consists of a single
  * malloced region from which smaller increments of memory are allocated,
  * but when this memory has been consumed, additional sacks will be added
  * to the chain, transparently to the calling code.
@@ -29,7 +29,7 @@
  * This package is a good solution when you need to store a largenumber
  * of small strings, and wish to minimize the overhead of malloc.
  * The sack_insert() call will copy a string into the buffer without
- * computing itslength first, and so the string will only be traversed once,
+ * computing its length first, so the string will only be traversed once,
  * except in the case where it turns out to be too large to fit the space
  * remaining. Use this function, rather than sack_alloc() with strlen()
  * and strcpy(), if you can.
@@ -54,22 +54,6 @@
  *
  * 	Returns the total memory allocated in the sack, including any chained sacks.
  *
- * void *sack_alloc(sack_t, int size);
- *
- * 	Allocates size bytes of 8-byte aligned storage, returning NULL
- * 	if memory is not available.
- *
- * char *sack_stralloc(sack_t, int size)
- *
- * 	Allocates size+1 bytes of unaligned storage.
- * 	This is suitable for storing null-terminated strings.
- *
- * char *sack_realloc(sack_t head, char *oldstr, int stringsize);
- *
- * 	Re-allocates an existing sack string to size stringsize+1.
- * 	WARNING - The string may be extended (or shrunk) in place,
- * 	so only the most recently allocated entry can be realloced in this way.
- *
  * char *sack_insert(sack_t, const char * string);
  *
  * 	Creates a copy of a null-terminated string, and returns a pointer
@@ -90,6 +74,50 @@
  * 	constraints as sack_realloc(), which is that string1 must be
  * 	the most-recently-allocated string.
  *
+ * void *sack_alloc(sack_t, int size);
+ *
+ * 	Allocates size bytes of 8-byte aligned storage, returning NULL
+ * 	if memory is not available.
+ *
+ * char *sack_stralloc(sack_t, int size)
+ *
+ * 	Allocates size+1 bytes of unaligned storage.
+ * 	This is suitable for storing null-terminated strings.
+ *
+ * void *sack_realloc(sack_t, void * pointer, int newsize);
+ *
+ *	Re-allocates an existing sack region to the new size.
+ *	WARNING: Only the last-allocated region can be grown, or shrunk, in place.
+ *	If the free space is too small, or the pointer was not the last allocated,
+ *	a new region will be returned. If the pointer was aligned, the new region
+ *	will be aligned as well.
+ *
+ * NOTE regarding sack_realloc - the sack uses three indexes into the data array:
+ *
+ *  last: index of the last-allocated region
+ *  free: index of the unallocated region
+ *  size: total size of the data region
+ *
+ *  |_________________________________________|_____________|_____________|
+ *  ^ data                               last ^        free ^        size ^
+ *
+ * We can adjust the free index to grow or shrink the last-allocated region,
+ * which supports the common use case, for example when using snprintf():
+ *
+ *      char * buff = sack_stralloc(sack, size);
+ *      int    len  = snprintf(buff, size, "%s", arg);
+ *
+ *      // Resize buff to the correct length.
+ *      buff = sack_realloc(sk, buff, len + 1);
+ *
+ *      // Rewrite buff if we had to expand it.
+ *      if (len >= size) {
+ *          snprintf(buff, len + 1, "%s", arg);
+ *      }
+ *
+ * But, if you try to realloc a region that was allocated prior to the last,
+ * an entirely new region is allocated, and the old region is not reclaimed.
+ *
  ***************************************************************************
  */
 #ifndef TMI_SACK_H
@@ -101,6 +129,7 @@
 
 typedef struct sack {
         struct sack * next;     /* for chaining extra buffers           */
+        unsigned      last;     /* index to the last allocated item     */
         unsigned      free;     /* index to first free char in data[]   */
         unsigned      size;     /* true size of the data[] array        */
         char          data[1];  /* allocated for (size+1) bytes         */
