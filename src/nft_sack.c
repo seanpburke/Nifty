@@ -536,7 +536,10 @@ int main(int argc, char *argv[])
         assert(0 == strcmp("abc", bf));
 
         // attempt to write eight bytes to the four-byte buffer
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
         wr = snprintf(bf, sz, "%s", "abcdefg");
+#pragma GCC diagnostic pop
         assert(wr == strlen("abcdefg"));
         assert(sz == strlen(bf) + 1);
         assert(0  == strcmp("abc", bf));
@@ -554,7 +557,10 @@ int main(int argc, char *argv[])
         char * arg  = "ambidextrous";
         assert(strlen(arg) == size);
         char * buff = sack_stralloc(sk, size);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-truncation"
         int    len  = snprintf(buff, size, "%s", arg);
+#pragma GCC diagnostic pop
         assert(len == size);
         assert(strlen(buff) == len - 1);
         buff = sack_realloc(sk, buff, len + 1);
