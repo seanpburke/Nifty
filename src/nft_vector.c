@@ -68,6 +68,7 @@ vector_create(const char * class, size_t size, int cap, nft_comparator cmp)
 
     nft_vector * v = nft_vector_cast(nft_core_create(class, size));
     if (v) {
+        v->core.destroy = vector_destroy;
         v->len = 0;
         v->cap = cap;
         v->cmp = cmp;
@@ -153,7 +154,7 @@ vector_vnew (nft_comparator cmp, ...)
 int
 vector_free(nft_vector * vec)
 {
-    return vec ? nft_vector_discard(vec) : EINVAL;
+    return nft_vector_discard(vec);
 }
 /*______________________________________________________________________________
  *
@@ -354,11 +355,13 @@ vector_slice(nft_vector *v, nft_slice s)
 {
     int          len  = nft_slice_len(s);
     nft_vector * copy = vector_new(len, v->cmp);
-
-    if (len && copy->vec) {
-        memcpy(copy->vec, &v->vec[s.x], len * sizeof(void *));
-        copy->vec[len] = NULL;
-        copy->len      = len;
+    if (copy) {
+        copy->len = len;
+        if (copy->vec) {
+            if (len > 0)
+                memcpy(copy->vec, &v->vec[s.x], len * sizeof(void *));
+            copy->vec[len] = NULL;
+        }
     }
     return copy;
 }
@@ -1013,7 +1016,9 @@ static void test_public(void)
 
     // Test vector free().
     assert(nft_vector_free(v) == OK);
+    assert(nft_vector_free(v) == EINVAL);
     assert(nft_vector_free(w) == OK);
+    assert(nft_vector_free(w) == EINVAL);
 
     // Test the set operations.
     v = nft_vector_vnew(vector_string_comparator, "a", "b", "c", NULL);
@@ -1025,10 +1030,14 @@ static void test_public(void)
         nft_vector_h z = nft_vector_slice(w, (nft_slice){ 0, nft_vector_len(w)});
         nft_vector_h r = nft_vector_union(y, z);
         assert(nft_vector_equal(r, x));
-        // Remember that y and z will be freed by nft_vector_union,
-        // so we only need to free x and r (tho r may actually be y or z).
+        // Remember that one of y or z will be freed by nft_vector_union,
+        // and the other returned as r, so we only need to free x and r.
         assert(nft_vector_free(x) == OK);
         assert(nft_vector_free(r) == OK);
+        assert(nft_vector_free(x) == EINVAL);
+        assert(nft_vector_free(y) == EINVAL);
+        assert(nft_vector_free(z) == EINVAL);
+        assert(nft_vector_free(r) == EINVAL);
     }
     {   // test intersection
         nft_vector_h x = nft_vector_vnew(vector_string_comparator, "c", NULL);
@@ -1038,6 +1047,11 @@ static void test_public(void)
         assert(nft_vector_equal(r, x));
         assert(nft_vector_free(x) == OK);
         assert(nft_vector_free(r) == OK);
+        // As with union, intersection frees one input and returns the other.
+        assert(nft_vector_free(x) == EINVAL);
+        assert(nft_vector_free(y) == EINVAL);
+        assert(nft_vector_free(z) == EINVAL);
+        assert(nft_vector_free(r) == EINVAL);
     }
     {   // test difference
         nft_vector_h x = nft_vector_vnew(vector_string_comparator, "a", "b", NULL);
@@ -1047,9 +1061,16 @@ static void test_public(void)
         assert(nft_vector_equal(r, x));
         assert(nft_vector_free(x) == OK);
         assert(nft_vector_free(r) == OK);
+        // As with union, difference frees one input and returns the other.
+        assert(nft_vector_free(x) == EINVAL);
+        assert(nft_vector_free(y) == EINVAL);
+        assert(nft_vector_free(z) == EINVAL);
+        assert(nft_vector_free(r) == EINVAL);
     }
     assert(nft_vector_free(v) == OK);
     assert(nft_vector_free(w) == OK);
+    assert(nft_vector_free(v) == EINVAL);
+    assert(nft_vector_free(w) == EINVAL);
 
     fprintf(stderr, "nft_vector: test_public passes.\n");
 }
