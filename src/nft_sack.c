@@ -610,14 +610,10 @@ int main(int argc, char *argv[])
         for (int i = 0; i < limit; i++)
         {
             char *item = sack_insert(sk, strings[i]);
-            if (item) {
-                if (printon) printf("Inserted item %s\n", item);
-            }
-            else {
-                printf("Error inserting item %s\n", item);
-                exit(1);
-            }
-            assert(strlen(item) == strlen(strings[i]));
+            assert(item != NULL);
+            assert(!strcmp(item, strings[i]));
+            if (printon)
+                printf("Inserted item %s\n", item);
 
             char * suff = "_foobar";
             char * word = sack_strcat(sk, item, suff);
