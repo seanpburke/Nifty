@@ -97,7 +97,7 @@ nft_string_print(nft_string_h handle)
 {
     nft_string * object = nft_string_lookup(handle);
     if (object) {
-	printf("string[%p] => '%s'\n", object->core.handle, object->string);
+	printf("%s[%p] -> '%s'\n", object->core.class, object->core.handle, object->string);
 	nft_string_discard(object);
     }
 }

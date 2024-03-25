@@ -1302,7 +1302,7 @@ int count_handles() {
  */
 int main(int argc, char * argv[])
 {
-    const int MAX_KEYS = 100000;
+    const int MAX_KEYS = 200000;
     char * keys[MAX_KEYS];
 
     // Test the public and private APIs.
