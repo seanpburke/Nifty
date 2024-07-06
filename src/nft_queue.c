@@ -373,6 +373,14 @@ nft_queue_dequeue(nft_queue * q, int timeout, void ** itemp)
 	// If the queue is less than one quarter full, shrink it by half.
 	if (!SHUTDOWN(q) && SHRINK(q)) queue_shrink(q);
 
+	// In nft_queue_shutdown, if there are any queued items, we will not release the
+	// initial reference that was held at queue creation time.  We only release it
+	// Once the queue is empty of items; this is that "extra" discard for that scenario.
+        if (EMPTY(q) && q->shutdown == 1 ) {
+	    q->shutdown++;
+	    nft_queue_discard(q);
+	}
+
 	return 0;
     }
     else if (SHUTDOWN(q))
