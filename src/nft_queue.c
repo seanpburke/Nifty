@@ -376,7 +376,7 @@ nft_queue_dequeue(nft_queue * q, int timeout, void ** itemp)
 	// In nft_queue_shutdown, if there are any queued items, we will not release the
 	// initial reference that was held at queue creation time.  We only release it
 	// Once the queue is empty of items; this is that "extra" discard for that scenario.
-        if (EMPTY(q) && q->shutdown == 1 ) {
+	if (EMPTY(q) && q->shutdown == 1 ) {
 	    q->shutdown++;
 	    nft_queue_discard(q);
 	}
