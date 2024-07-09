@@ -835,7 +835,9 @@ poll_output(void * arg)
 	}
 	countout++;
     }
-    assert(ESHUTDOWN == rc);
+    // Depending on timing, we could get ESHUTDOWN or EINVAL.
+    assert(ESHUTDOWN == rc || EINVAL == rc);
+
     fputs("output thread done\n", stderr);
     return (void*) rc;
 }
@@ -951,14 +953,15 @@ t1( void)
     for (int i = 0 ; Strings[ i] != NULL ; i++)
 	assert(0 == nft_queue_add( q, strdup(Strings[i])));
 
-    // You should always follow this pattern when shutting down a queue.
-    //
-    if (ETIMEDOUT == nft_queue_shutdown(q, 1)) {
-	void * str;
-	while ((str = nft_queue_pop_wait(q, 0))) free(str);
-	nft_queue_shutdown(q, 0);
-    }
-    assert(EINVAL == nft_queue_shutdown(q, 0));
+    // There are no waiters, so shutdown will timeout.
+    assert(ETIMEDOUT == nft_queue_shutdown(q, 1));
+
+    // Items can be popped while the queue is shutting down.
+    void * str;
+    while ((str = nft_queue_pop_wait(q, 0))) free(str);
+
+    // The queue will have been freed after the last item is removed.
+    assert(EINVAL == nft_queue_state(q));
 
     fprintf(stderr, "passed.\n");
 }
@@ -1035,9 +1038,6 @@ t3( void)
     // Once the queue has been shutdown, _pop will not block.
     while ((ss = nft_queue_pop(q))) free(ss);
 
-    // Shutdown on the empty queue will return success.
-    assert(0 == nft_queue_shutdown(q, 0));
-
     // The queue has been destroyed.
     assert(EINVAL == nft_queue_state(q));
 
@@ -1089,9 +1089,11 @@ t4( void)
     rc = pthread_join(th, &value); assert(0 == rc);
     assert(ESHUTDOWN == (long) value);
 
-    // Shutdown succeeds after we pop the item.
+    // Items can still be popped while the queue is shutting down.
     assert(strcmp("first",nft_queue_pop_wait(q, 0)) == 0);
-    assert(0       == nft_queue_shutdown(q, 0));
+
+    // The queue is freed after we pop the last item.
+    assert(EINVAL == nft_queue_state(q));
 
     fprintf(stderr, "passed.\n");
 }
