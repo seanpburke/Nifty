@@ -925,11 +925,10 @@ main()
 
     // Wait for the output thread to finish emptying the output queue.
     rc = pthread_join(output_thread, &thread_return);  assert(rc == 0);
-    assert((long)thread_return == ESHUTDOWN);
+    assert(ESHUTDOWN == (long)thread_return || EINVAL == (long)thread_return);
 
-    // Now shut it down again. If it failed the first time, this should succeed,
-    // but if it succeeded on the first try, this should return EINVAL.
-    rc = nft_queue_shutdown(output_Q, 0); assert(rc == 0 || rc == EINVAL);
+    // The output queue should now be destroyed.
+    assert(EINVAL == nft_queue_state(output_Q));
 
     TIME; // compute elapsed time
     fprintf(stderr, "words in: %d	words out: %d	elapsed: %.3f\n", countin, countout, ELAPSED);
