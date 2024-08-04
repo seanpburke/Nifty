@@ -155,8 +155,7 @@ int nft_queue_pop_wait_ex(nft_queue_h h, int timeout, void ** itemp);
  *
  *  This call prevents any more items being enqueued,
  *  and optionally waits for the queue to become empty.
- *  The queue will be destroyed if it is empty when
- *  _shutdown returns.
+ *  The queue will be destroyed when it becomes empty.
  *
  *  Shutdown awakens threads that are blocked on this queue.
  *  Threads that were blocked in a call to nft_queue_pop_wait
@@ -168,14 +167,14 @@ int nft_queue_pop_wait_ex(nft_queue_h h, int timeout, void ** itemp);
  *  to succeed, while the queue is shutting down, but attempts
  *  to _add or _push items will fail with the error ESHUTDOWN.
  *  When the queue is empty, nft_queue_pop(_wait) will return
- *  NULL without waiting, and nft_queue_pop_wait_ex will
- *  return ESHUTDOWN, or EINVAL if the queue has been destroyed.
+ *  NULL without waiting, and nft_queue_pop_wait_ex will return
+ *  ESHUTDOWN, or EINVAL if the queue had already been destroyed.
  *
  *  Depending on the timeout parameter, nft_queue_shutdown
  *  will return immediately, or wait for the queue to empty.
- *  If ETIMEDOUT is returned, the queue handle is still valid.
- *  The caller should pop and destroy the remaining queue items,
- *  and then call nft_queue_shutdown a second time to destroy it.
+ *  If ETIMEDOUT is returned, the queue was not empty and the handle
+ *  may still be valid. The caller can ensure that the queue will be
+ *  destroyed, by popping and destroying any remaining queue items.
  *
  *  timeout < 0 Wait for queue to empty, queue will be destroyed.
  *  timeout = 0 Immediately return zero or ETIMEDOUT (see below).
@@ -183,7 +182,7 @@ int nft_queue_pop_wait_ex(nft_queue_h h, int timeout, void ** itemp);
  *
  *  Returns 	zero 	  - Queue is empty, and has been destroyed.
  *  		EINVAL	  - not a valid queue.
- *		ETIMEDOUT - Queue not empty, and will not be destroyed.
+ *		ETIMEDOUT - Queue was not empty when time ran out.
  */
 int	nft_queue_shutdown( nft_queue_h q, int timeout );
 

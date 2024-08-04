@@ -76,7 +76,10 @@ nft_core_create(const char * class, size_t size)
 	*object = (nft_core) { class, NULL, nft_core_destroy };
 
 	// Attempt to allocate a unique object->handle.
-	if (!nft_handle_alloc(object)) {
+	nft_handle h = nft_handle_alloc(object);
+	if (h) {
+            assert(object->handle == h);
+        } else {
 	    free(object);
 	    object = NULL;
 	}
@@ -96,7 +99,7 @@ int
 nft_core_discard(nft_core * p)
 {
     nft_core * object = nft_core_cast(p, nft_core_class);
-    assert(object);
+    assert(object || !p); // ignore null pointers
     return object ? nft_handle_discard(object) : EINVAL ;
 }
 
